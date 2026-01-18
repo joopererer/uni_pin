@@ -85,6 +85,8 @@ export interface Translations {
     deleteNoteWarning: string;
     batchDelete: string;
     batchDeleteWarning: string;
+    deleteImage: string;
+    deleteImageWarning: string;
   };
   // 托盘菜单
   tray: {
@@ -177,6 +179,8 @@ const translations: Record<Language, Translations> = {
       deleteNoteWarning: '确定要删除这个便签吗？\n\n删除后无法恢复！',
       batchDelete: '批量删除',
       batchDeleteWarning: '确定要删除选中的 {count} 个便签吗？\n\n删除后无法恢复！',
+      deleteImage: '删除图片',
+      deleteImageWarning: '确定要删除这张图片吗？',
     },
     tray: {
       newNote: '新建便签 (Alt+N)',
@@ -266,6 +270,8 @@ const translations: Record<Language, Translations> = {
       deleteNoteWarning: 'Are you sure you want to delete this note?\n\nThis action cannot be undone!',
       batchDelete: 'Batch Delete',
       batchDeleteWarning: 'Are you sure you want to delete {count} selected notes?\n\nThis action cannot be undone!',
+      deleteImage: 'Delete Image',
+      deleteImageWarning: 'Are you sure you want to delete this image?',
     },
     tray: {
       newNote: 'New Note (Alt+N)',

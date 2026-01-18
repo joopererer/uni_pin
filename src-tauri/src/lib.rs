@@ -11,6 +11,7 @@ use tauri::{
 };
 use image::GenericImageView;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use uuid::Uuid;
 use base64::Engine;
 
@@ -368,9 +369,9 @@ fn save_image(image_data: String) -> Result<String, String> {
 
 /// 获取自启动状态
 #[tauri::command]
-fn get_auto_start(state: State<'_, NoteStoreState>) -> bool {
-    let store = state.0.lock().unwrap();
-    store.settings.auto_start
+fn get_auto_start(app: AppHandle) -> Result<bool, String> {
+    let autostart_manager = app.autolaunch();
+    autostart_manager.is_enabled().map_err(|e| format!("检查自启动状态失败: {}", e))
 }
 
 /// 获取语言设置
@@ -420,76 +421,27 @@ async fn check_update() -> Result<Option<serde_json::Value>, String> {
 
 /// 设置自启动
 #[tauri::command]
-fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
-    // 先更新存储
+fn set_auto_start(app: AppHandle, state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
+    let autostart_manager = app.autolaunch();
+    
+    // 使用 Tauri autostart 插件设置自启动
+    if enabled {
+        autostart_manager
+            .enable()
+            .map_err(|e| format!("启用自启动失败: {}", e))?;
+        println!("✅ 已启用自启动");
+    } else {
+        autostart_manager
+            .disable()
+            .map_err(|e| format!("禁用自启动失败: {}", e))?;
+        println!("✅ 已禁用自启动");
+    }
+    
+    // 更新存储中的设置状态
     {
         let mut store = state.0.lock().unwrap();
         store.settings.auto_start = enabled;
         save_notes(&store)?;
-    }
-    
-    // 配置 Windows 自启动（在后台线程执行，避免阻塞）
-    #[cfg(target_os = "windows")]
-    {
-        use std::process::Command;
-        
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("获取程序路径失败: {}", e))?
-            .to_string_lossy()
-            .to_string();
-        
-        // 在后台线程执行注册表操作
-        std::thread::spawn(move || {
-            if enabled {
-                // 添加到注册表
-                let output = Command::new("reg")
-                    .args([
-                        "add",
-                        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                        "/v", "UniPin",
-                        "/t", "REG_SZ",
-                        "/d", &exe_path,
-                        "/f"
-                    ])
-                    .output();
-                
-                if let Err(e) = output {
-                    eprintln!("❌ 添加自启动失败: {}", e);
-                } else if let Ok(out) = output {
-                    if !out.status.success() {
-                        eprintln!("❌ 添加自启动失败: {}", String::from_utf8_lossy(&out.stderr));
-                    } else {
-                        println!("✅ 已添加自启动");
-                    }
-                }
-            } else {
-                // 从注册表移除
-                let output = Command::new("reg")
-                    .args([
-                        "delete",
-                        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                        "/v", "UniPin",
-                        "/f"
-                    ])
-                    .output();
-                
-                if let Err(e) = output {
-                    eprintln!("❌ 移除自启动失败: {}", e);
-                } else if let Ok(out) = output {
-                    if !out.status.success() {
-                        // 如果注册表项不存在，也认为是成功（可能是已经删除）
-                        let stderr = String::from_utf8_lossy(&out.stderr);
-                        if !stderr.contains("ERROR") || stderr.contains("not found") {
-                            println!("✅ 已移除自启动");
-                        } else {
-                            eprintln!("❌ 移除自启动失败: {}", stderr);
-                        }
-                    } else {
-                        println!("✅ 已移除自启动");
-                    }
-                }
-            }
-        });
     }
     
     Ok(())
@@ -642,6 +594,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(MacosLauncher::LaunchAgent, Some(vec![])))
         .invoke_handler(tauri::generate_handler![
             create_note_window,
             open_manager,

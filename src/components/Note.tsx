@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import ConfirmDialog from "./ConfirmDialog";
 import { useI18n } from "../hooks/useI18n";
 
@@ -39,6 +40,8 @@ function Note({ noteId }: NoteProps) {
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showOpacitySlider, setShowOpacitySlider] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteImageConfirm, setShowDeleteImageConfirm] = useState(false);
+  const [imageToDelete, setImageToDelete] = useState<HTMLImageElement | null>(null);
   
   // 工具栏自动隐藏相关状态
   const [showToolbar, setShowToolbar] = useState(true);
@@ -88,6 +91,40 @@ function Note({ noteId }: NoteProps) {
     }
   }, [isLoaded]);
 
+  // 修复已保存图片的路径并绑定点击事件
+  const fixSavedImages = useCallback(() => {
+    if (!contentRef.current) return;
+    
+    const images = contentRef.current.querySelectorAll('img');
+    images.forEach((img) => {
+      // 如果图片路径是 file:// 开头的，需要转换为 convertFileSrc
+      if (img.src.startsWith('file://')) {
+        try {
+          // 提取原始文件路径（去除 file:// 前缀）
+          const filePath = img.src.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
+          // 在 Windows 上，路径可能包含驱动器字母，需要特殊处理
+          const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+          img.src = convertFileSrc(normalizedPath);
+        } catch (e) {
+          console.error("转换图片路径失败:", e);
+        }
+      }
+      
+      // 为图片添加样式和点击事件
+      if (!img.classList.contains('note-image')) {
+        img.className = 'note-image';
+        img.style.maxWidth = "100%";
+        img.style.borderRadius = "4px";
+        img.style.margin = "8px 0";
+        img.style.cursor = "pointer";
+        img.onclick = () => {
+          setImageToDelete(img);
+          setShowDeleteImageConfirm(true);
+        };
+      }
+    });
+  }, []);
+
   // 加载便签数据
   useEffect(() => {
     const loadNoteAndShow = async () => {
@@ -95,6 +132,8 @@ function Note({ noteId }: NoteProps) {
         const data = await invoke<NoteData | null>("get_note", { id: noteId });
         if (data && contentRef.current) {
           contentRef.current.innerHTML = data.content || "";
+          // 修复已保存图片的路径
+          fixSavedImages();
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
           setAlwaysOnTop(data.always_on_top === true);
@@ -118,7 +157,7 @@ function Note({ noteId }: NoteProps) {
       }
     };
     loadNoteAndShow();
-  }, [noteId]);
+  }, [noteId, fixSavedImages]);
 
   // 防抖保存
   const saveToBackend = useCallback(() => {
@@ -218,17 +257,16 @@ function Note({ noteId }: NoteProps) {
         const savedPath = await invoke<string>("save_image", { imageData: base64 });
         
         const img = document.createElement("img");
-        img.src = `file://${savedPath}`;
+        // 使用 convertFileSrc 转换文件路径为可访问的 URL
+        img.src = convertFileSrc(savedPath);
         img.className = "note-image";
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
         img.style.margin = "8px 0";
         img.style.cursor = "pointer";
         img.onclick = () => {
-          if (confirm("删除这张图片？")) {
-            img.remove();
-            handleContentChange();
-          }
+          setImageToDelete(img);
+          setShowDeleteImageConfirm(true);
         };
 
         const selection = window.getSelection();
@@ -247,14 +285,46 @@ function Note({ noteId }: NoteProps) {
         handleContentChange();
       } catch (err) {
         console.error("保存图片失败:", err);
+        // 如果保存失败，使用 base64 直接显示
         const img = document.createElement("img");
         img.src = base64;
         img.className = "note-image";
-        if (contentRef.current) contentRef.current.appendChild(img);
+        img.style.maxWidth = "100%";
+        img.style.borderRadius = "4px";
+        img.style.margin = "8px 0";
+        img.style.cursor = "pointer";
+        img.onclick = () => {
+          setImageToDelete(img);
+          setShowDeleteImageConfirm(true);
+        };
+        if (contentRef.current) {
+          const selection = window.getSelection();
+          if (selection && selection.rangeCount > 0 && contentRef.current.contains(selection.anchorNode)) {
+            const range = selection.getRangeAt(0);
+            range.deleteContents();
+            range.insertNode(img);
+            range.setStartAfter(img);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          } else {
+            contentRef.current.appendChild(img);
+          }
+        }
         handleContentChange();
       }
     };
     reader.readAsDataURL(file);
+  };
+
+  // 确认删除图片
+  const confirmDeleteImage = () => {
+    if (imageToDelete) {
+      imageToDelete.remove();
+      handleContentChange();
+    }
+    setShowDeleteImageConfirm(false);
+    setImageToDelete(null);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -472,15 +542,30 @@ function Note({ noteId }: NoteProps) {
         )}
       </div>
 
-      {/* 删除确认对话框 */}
+      {/* 删除便签确认对话框 */}
       <ConfirmDialog
         open={showDeleteConfirm}
-              title={t("confirm.deleteNote")}
+        title={t("confirm.deleteNote")}
         message={t("confirm.deleteNoteWarning")}
         onConfirm={confirmDelete}
         onCancel={() => setShowDeleteConfirm(false)}
-            confirmText={t("common.delete")}
-            cancelText={t("common.cancel")}
+        confirmText={t("common.delete")}
+        cancelText={t("common.cancel")}
+        danger={true}
+      />
+
+      {/* 删除图片确认对话框 */}
+      <ConfirmDialog
+        open={showDeleteImageConfirm}
+        title={t("confirm.deleteImage")}
+        message={t("confirm.deleteImageWarning")}
+        onConfirm={confirmDeleteImage}
+        onCancel={() => {
+          setShowDeleteImageConfirm(false);
+          setImageToDelete(null);
+        }}
+        confirmText={t("common.delete")}
+        cancelText={t("common.cancel")}
         danger={true}
       />
     </>

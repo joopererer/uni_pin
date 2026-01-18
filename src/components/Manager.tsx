@@ -61,6 +61,13 @@ function Manager() {
       setAutoStart(isAutoStart);
     } catch (e) {
       console.error("加载设置失败:", e);
+      // 如果获取失败，尝试从本地存储读取
+      try {
+        const stored = await invoke<boolean>("get_auto_start");
+        setAutoStart(stored);
+      } catch (e2) {
+        console.error("从本地存储读取失败:", e2);
+      }
     }
   }, []);
 
