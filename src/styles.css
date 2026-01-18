@@ -425,6 +425,15 @@ body,
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 8px;
+}
+
+.setting-item:last-child {
+  margin-bottom: 0;
+}
+
+.setting-item-spaced {
+  margin-top: 12px;
 }
 
 .setting-label {
@@ -434,26 +443,44 @@ body,
 
 .language-select {
   padding: 6px 12px;
-  border: none;
+  border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.2);
+  background: #5d4037;
   color: white;
   font-size: 14px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
 }
 
 .language-select:hover {
-  background: rgba(255, 255, 255, 0.3);
+  border-color: #4caf50;
+  background: #5d4037;
 }
 
 .language-select:focus {
   outline: none;
-  background: rgba(255, 255, 255, 0.25);
+  border-color: #4caf50;
+  background: #5d4037;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
 }
 
+/* 语言选择器的选项样式 */
+/* 未选中的选项 - 默认灰色/褐色底色 */
 .language-select option {
-  background: #667eea;
+  background: #5d4037;
+  color: white;
+  padding: 8px;
+}
+
+/* 选中的选项 - 绿色背景 */
+.language-select option:checked {
+  background: #4caf50;
+  color: white;
+}
+
+/* 鼠标悬停时的选项 - 绿色背景 */
+.language-select option:hover {
+  background: #4caf50;
   color: white;
 }
 

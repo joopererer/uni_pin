@@ -107,26 +107,6 @@ function Manager() {
     };
   }, [loadNotes, loadSettings]);
 
-  // 创建新便签
-  const handleCreateNote = async (e?: React.MouseEvent) => {
-    if (e) {
-      e.stopPropagation();
-      e.preventDefault();
-    }
-    try {
-      console.log("创建新便签...");
-      const label = await invoke<string>("create_note_window");
-      console.log("创建成功，窗口标签:", label);
-      // 等待窗口创建和初始化完成
-      setTimeout(() => {
-        loadNotes();
-      }, 800);
-    } catch (e) {
-      console.error("创建便签失败:", e);
-      alert("创建便签失败: " + e);
-    }
-  };
-
   // 显示便签
   const handleShowNote = async (id: string) => {
     if (selectMode) {
@@ -366,9 +346,6 @@ function Manager() {
             <button className="manager-btn secondary" onClick={handleHideAll}>
               🔽 {t("manager.hideAll")}
             </button>
-            <button className="manager-btn primary" onClick={handleCreateNote}>
-              ➕ {t("manager.newNote")}
-            </button>
             <button className="manager-btn secondary" onClick={() => setShowAbout(true)}>
               ℹ️ {t("manager.about")}
             </button>
@@ -377,7 +354,7 @@ function Manager() {
 
         {/* 设置面板 */}
         <div className="settings-panel">
-          <h3>⚙️ {t("manager.languageSetting")}</h3>
+          <h3>⚙️ {t("manager.settings")}</h3>
           <div className="setting-item">
             <span className="setting-label">{t("manager.autoStart")}</span>
             <div
@@ -385,12 +362,17 @@ function Manager() {
               onClick={handleToggleAutoStart}
             />
           </div>
-          <div className="setting-item">
+          <div className="setting-item setting-item-spaced">
             <span className="setting-label">{t("manager.language")}</span>
             <select
               className="language-select"
               value={language}
-              onChange={(e) => changeLanguage(e.target.value as "zh" | "en")}
+              onChange={async (e) => {
+                const newLang = e.target.value as "zh" | "en";
+                await changeLanguage(newLang);
+                // 强制刷新页面以确保语言更新
+                window.location.reload();
+              }}
             >
               <option value="zh">中文</option>
               <option value="en">English</option>
@@ -458,11 +440,6 @@ function Manager() {
           <div className="empty-state">
             <span>{searchTerm ? "🔍" : "📝"}</span>
             <p>{searchTerm ? tWith("manager.emptySearch", { term: searchTerm }) : t("manager.emptyState")}</p>
-            {!searchTerm && (
-              <button className="manager-btn primary" onClick={handleCreateNote}>
-                ➕ {t("manager.newNote")}
-              </button>
-            )}
           </div>
         ) : (
           <div className="notes-grid">

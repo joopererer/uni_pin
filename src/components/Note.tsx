@@ -98,6 +98,14 @@ function Note({ noteId }: NoteProps) {
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
           setAlwaysOnTop(data.always_on_top === true);
+          // 确保窗口状态与数据一致
+          if (data.always_on_top === true) {
+            const appWindow = getCurrentWindow();
+            appWindow.setAlwaysOnTop(true).catch(console.error);
+          } else {
+            const appWindow = getCurrentWindow();
+            appWindow.setAlwaysOnTop(false).catch(console.error);
+          }
         }
         setIsLoaded(true);
         await invoke("show_note_window", { id: noteId });
@@ -275,6 +283,9 @@ function Note({ noteId }: NoteProps) {
     try {
       const newState = await invoke<boolean>("toggle_always_on_top", { id: noteId });
       setAlwaysOnTop(newState);
+      // 同步窗口状态
+      const appWindow = getCurrentWindow();
+      await appWindow.setAlwaysOnTop(newState);
     } catch (e) {
       console.error("切换置顶失败:", e);
     }

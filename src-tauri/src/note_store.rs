@@ -67,7 +67,7 @@ impl NoteData {
             size: WindowSize::default(),
             closed: false,
             opacity: 0,
-            always_on_top: true,
+            always_on_top: false,
             created_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()

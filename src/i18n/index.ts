@@ -37,6 +37,7 @@ export interface Translations {
     autoStart: string;
     language: string;
     languageSetting: string;
+    settings: string;
   };
   // 便签
   note: {
@@ -132,6 +133,7 @@ const translations: Record<Language, Translations> = {
       autoStart: '开机自动启动',
       language: '语言',
       languageSetting: '界面语言',
+      settings: '设置',
     },
     note: {
       placeholder: '输入便签内容... 支持 Ctrl+V 粘贴图片',
@@ -220,6 +222,7 @@ const translations: Record<Language, Translations> = {
       autoStart: 'Start with system',
       language: 'Language',
       languageSetting: 'Interface Language',
+      settings: 'Settings',
     },
     note: {
       placeholder: 'Enter note content... Support Ctrl+V to paste images',
