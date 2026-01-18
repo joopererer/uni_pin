@@ -2,7 +2,7 @@ mod note_store;
 pub mod updater;
 
 use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir};
-use updater::{check_for_updates, GitHubRelease};
+use updater::check_for_updates;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -408,7 +408,6 @@ fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(),
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        use std::time::Duration;
         
         let exe_path = std::env::current_exe()
             .map_err(|e| format!("获取程序路径失败: {}", e))?
