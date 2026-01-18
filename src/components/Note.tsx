@@ -31,17 +31,59 @@ function Note({ noteId }: NoteProps) {
   const [themeIndex, setThemeIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [opacity, setOpacity] = useState(0);
-  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false); // 默认不置顶
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showOpacitySlider, setShowOpacitySlider] = useState(false);
   
+  // 工具栏自动隐藏相关状态
+  const [showToolbar, setShowToolbar] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isHovering, setIsHovering] = useState(false);
+  
   const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const opacityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const toolbarHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const theme = NOTE_THEMES[themeIndex];
+
+  // 工具栏显示逻辑
+  useEffect(() => {
+    // 编辑中或鼠标悬停时显示
+    if (isEditing || isHovering) {
+      setShowToolbar(true);
+      if (toolbarHideTimeoutRef.current) {
+        clearTimeout(toolbarHideTimeoutRef.current);
+        toolbarHideTimeoutRef.current = null;
+      }
+    } else {
+      // 非编辑且非悬停时，延迟隐藏
+      toolbarHideTimeoutRef.current = setTimeout(() => {
+        setShowToolbar(false);
+      }, 1500);
+    }
+    
+    return () => {
+      if (toolbarHideTimeoutRef.current) {
+        clearTimeout(toolbarHideTimeoutRef.current);
+      }
+    };
+  }, [isEditing, isHovering]);
+
+  // 首次加载显示工具栏，2秒后自动隐藏
+  useEffect(() => {
+    if (isLoaded) {
+      const timer = setTimeout(() => {
+        if (!isEditing && !isHovering) {
+          setShowToolbar(false);
+        }
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoaded]);
 
   // 加载便签数据
   useEffect(() => {
@@ -52,7 +94,7 @@ function Note({ noteId }: NoteProps) {
           contentRef.current.innerHTML = data.content || "";
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
-          setAlwaysOnTop(data.always_on_top !== false);
+          setAlwaysOnTop(data.always_on_top === true); // 默认 false
         }
         setIsLoaded(true);
         await invoke("show_note_window", { id: noteId });
@@ -162,7 +204,6 @@ function Note({ noteId }: NoteProps) {
       const base64 = e.target?.result as string;
       
       try {
-        // 保存到 AppData 并获取路径
         const savedPath = await invoke<string>("save_image", { imageData: base64 });
         
         const img = document.createElement("img");
@@ -195,7 +236,6 @@ function Note({ noteId }: NoteProps) {
         handleContentChange();
       } catch (err) {
         console.error("保存图片失败:", err);
-        // 回退到 base64
         const img = document.createElement("img");
         img.src = base64;
         img.className = "note-image";
@@ -274,6 +314,32 @@ function Note({ noteId }: NoteProps) {
     setThemeIndex((prev) => (prev + 1) % NOTE_THEMES.length);
   };
 
+  // 编辑状态处理
+  const handleContentFocus = () => {
+    setIsEditing(true);
+  };
+
+  const handleContentBlur = () => {
+    setIsEditing(false);
+    handleContentChange();
+  };
+
+  // 双击进入编辑模式
+  const handleDoubleClick = () => {
+    setIsEditing(true);
+    contentRef.current?.focus();
+  };
+
+  // 鼠标进入/离开
+  const handleMouseEnter = () => {
+    setIsHovering(true);
+  };
+
+  const handleMouseLeave = () => {
+    setIsHovering(false);
+    setShowOpacitySlider(false);
+  };
+
   // 计算实际的背景透明度
   const bgOpacity = (100 - opacity) / 100;
   const bgColor = theme.bg;
@@ -281,8 +347,12 @@ function Note({ noteId }: NoteProps) {
 
   return (
     <div
-      className="note-container"
+      ref={containerRef}
+      className={`note-container ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
       onContextMenu={handleContextMenu}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onDoubleClick={handleDoubleClick}
       style={{
         "--note-bg": bgColor,
         "--note-header": headerColor,
@@ -291,7 +361,7 @@ function Note({ noteId }: NoteProps) {
       } as React.CSSProperties}
     >
       {/* 顶部拖拽把手 */}
-      <div className="note-header" data-tauri-drag-region>
+      <div className={`note-header ${showToolbar ? 'visible' : ''}`} data-tauri-drag-region>
         <div className="drag-indicator" data-tauri-drag-region>
           <span data-tauri-drag-region></span>
           <span data-tauri-drag-region></span>
@@ -299,11 +369,23 @@ function Note({ noteId }: NoteProps) {
         </div>
 
         {/* 置顶状态指示 */}
-        {!alwaysOnTop && <span className="pin-indicator">📌</span>}
+        {alwaysOnTop && <span className="pin-indicator" title="已置顶">📍</span>}
 
         {/* 工具栏 */}
         <div className="note-toolbar">
-          {/* 透明度调节 */}
+          <button
+            className="toolbar-btn"
+            onClick={() => fileInputRef.current?.click()}
+            title="添加图片"
+          >
+            🖼️
+          </button>
+
+          <button className="toolbar-btn" onClick={cycleTheme} title="切换颜色">
+            🎨
+          </button>
+
+          {/* 透明度调节 - 移到颜色后面 */}
           <div className="opacity-control">
             <button
               className="toolbar-btn"
@@ -326,18 +408,6 @@ function Note({ noteId }: NoteProps) {
               </div>
             )}
           </div>
-
-          <button
-            className="toolbar-btn"
-            onClick={() => fileInputRef.current?.click()}
-            title="添加图片"
-          >
-            🖼️
-          </button>
-
-          <button className="toolbar-btn" onClick={cycleTheme} title="切换颜色">
-            🎨
-          </button>
 
           <button className="toolbar-btn hide-btn" onClick={handleHide} title="隐藏便签">
             −
@@ -363,7 +433,8 @@ function Note({ noteId }: NoteProps) {
         contentEditable
         onPaste={handlePaste}
         onInput={handleContentChange}
-        onBlur={handleContentChange}
+        onFocus={handleContentFocus}
+        onBlur={handleContentBlur}
         data-placeholder="输入便签内容... 支持 Ctrl+V 粘贴图片"
         suppressContentEditableWarning
       />

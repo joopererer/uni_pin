@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
 const NOTE_THEMES = [
@@ -26,28 +26,30 @@ function Manager() {
   const [notes, setNotes] = useState<NoteData[]>([]);
   const [autoStart, setAutoStart] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
 
   // 加载所有便签
-  const loadNotes = async () => {
+  const loadNotes = useCallback(async () => {
     try {
       const allNotes = await invoke<NoteData[]>("get_all_notes");
-      // 按创建时间排序
       allNotes.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
       setNotes(allNotes);
     } catch (e) {
       console.error("加载便签列表失败:", e);
     }
-  };
+  }, []);
 
   // 加载设置
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       const isAutoStart = await invoke<boolean>("get_auto_start");
       setAutoStart(isAutoStart);
     } catch (e) {
       console.error("加载设置失败:", e);
     }
-  };
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -57,25 +59,34 @@ function Manager() {
     };
     init();
 
-    // 定时刷新
-    const interval = setInterval(loadNotes, 2000);
+    // 更频繁地刷新以同步状态
+    const interval = setInterval(loadNotes, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadNotes, loadSettings]);
 
   // 创建新便签
   const handleCreateNote = async () => {
     try {
-      await invoke("create_note_window");
-      setTimeout(loadNotes, 500);
+      console.log("Creating new note...");
+      const result = await invoke("create_note_window");
+      console.log("Created note:", result);
+      await loadNotes();
     } catch (e) {
       console.error("创建便签失败:", e);
+      alert("创建便签失败: " + e);
     }
   };
 
   // 显示便签
   const handleShowNote = async (id: string) => {
+    if (selectMode) {
+      toggleSelect(id);
+      return;
+    }
     try {
+      console.log("Showing note:", id);
       await invoke("show_note", { id });
+      await loadNotes();
     } catch (e) {
       console.error("显示便签失败:", e);
     }
@@ -84,8 +95,9 @@ function Manager() {
   // 隐藏便签
   const handleHideNote = async (id: string) => {
     try {
+      console.log("Hiding note:", id);
       await invoke("hide_note", { id });
-      setTimeout(loadNotes, 200);
+      await loadNotes();
     } catch (e) {
       console.error("隐藏便签失败:", e);
     }
@@ -96,7 +108,7 @@ function Manager() {
     if (!confirm("确定要删除这个便签吗？\n\n删除后无法恢复！")) return;
     try {
       await invoke("delete_note", { id });
-      setTimeout(loadNotes, 200);
+      await loadNotes();
     } catch (e) {
       console.error("删除便签失败:", e);
     }
@@ -104,22 +116,30 @@ function Manager() {
 
   // 显示所有便签
   const handleShowAll = async () => {
-    for (const note of notes) {
-      if (note.closed) {
+    try {
+      console.log("Showing all notes...");
+      for (const note of notes) {
+        console.log(`Showing note ${note.id}, closed: ${note.closed}`);
         await invoke("show_note", { id: note.id });
       }
+      await loadNotes();
+    } catch (e) {
+      console.error("显示全部失败:", e);
     }
-    setTimeout(loadNotes, 500);
   };
 
   // 隐藏所有便签
   const handleHideAll = async () => {
-    for (const note of notes) {
-      if (!note.closed) {
-        await invoke("hide_note", { id: note.id });
+    try {
+      for (const note of notes) {
+        if (!note.closed) {
+          await invoke("hide_note", { id: note.id });
+        }
       }
+      await loadNotes();
+    } catch (e) {
+      console.error("隐藏全部失败:", e);
     }
-    setTimeout(loadNotes, 500);
   };
 
   // 切换自启动
@@ -133,9 +153,78 @@ function Manager() {
     }
   };
 
+  // 选择相关
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIds(new Set(filteredNotes.map(n => n.id)));
+  };
+
+  const deselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const toggleSelectMode = () => {
+    setSelectMode(!selectMode);
+    if (selectMode) {
+      setSelectedIds(new Set());
+    }
+  };
+
+  // 批量删除
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!confirm(`确定要删除选中的 ${selectedIds.size} 个便签吗？\n\n删除后无法恢复！`)) return;
+    
+    try {
+      for (const id of selectedIds) {
+        await invoke("delete_note", { id });
+      }
+      setSelectedIds(new Set());
+      await loadNotes();
+    } catch (e) {
+      console.error("批量删除失败:", e);
+    }
+  };
+
+  // 批量显示
+  const handleBatchShow = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      for (const id of selectedIds) {
+        await invoke("show_note", { id });
+      }
+      await loadNotes();
+    } catch (e) {
+      console.error("批量显示失败:", e);
+    }
+  };
+
+  // 批量隐藏
+  const handleBatchHide = async () => {
+    if (selectedIds.size === 0) return;
+    try {
+      for (const id of selectedIds) {
+        await invoke("hide_note", { id });
+      }
+      await loadNotes();
+    } catch (e) {
+      console.error("批量隐藏失败:", e);
+    }
+  };
+
   // 获取预览文本
   const getPreviewText = (content: string): string => {
-    // 移除 HTML 标签
     const text = content
       .replace(/<img[^>]*>/g, "[图片]")
       .replace(/<[^>]+>/g, "")
@@ -155,10 +244,12 @@ function Manager() {
     });
   };
 
-  // 检查便签窗口是否可见
-  const isNoteVisible = (note: NoteData): boolean => {
-    return !note.closed;
-  };
+  // 搜索过滤
+  const filteredNotes = notes.filter(note => {
+    if (!searchTerm.trim()) return true;
+    const text = getPreviewText(note.content).toLowerCase();
+    return text.includes(searchTerm.toLowerCase());
+  });
 
   if (loading) {
     return (
@@ -191,6 +282,53 @@ function Manager() {
         </div>
       </div>
 
+      {/* 搜索和多选控制 */}
+      <div className="search-bar">
+        <div className="search-input-wrapper">
+          <span className="search-icon">🔍</span>
+          <input
+            type="text"
+            className="search-input"
+            placeholder="搜索便签内容..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          {searchTerm && (
+            <button className="search-clear" onClick={() => setSearchTerm("")}>
+              ✕
+            </button>
+          )}
+        </div>
+        <button 
+          className={`manager-btn ${selectMode ? 'primary' : 'secondary'}`}
+          onClick={toggleSelectMode}
+        >
+          {selectMode ? '✓ 完成选择' : '☐ 多选管理'}
+        </button>
+      </div>
+
+      {/* 多选操作栏 */}
+      {selectMode && (
+        <div className="batch-actions">
+          <span className="selected-count">已选择 {selectedIds.size} 项</span>
+          <button className="batch-btn" onClick={selectAll}>全选</button>
+          <button className="batch-btn" onClick={deselectAll}>取消全选</button>
+          <button className="batch-btn" onClick={handleBatchShow} disabled={selectedIds.size === 0}>
+            👁️ 批量显示
+          </button>
+          <button className="batch-btn" onClick={handleBatchHide} disabled={selectedIds.size === 0}>
+            🔽 批量隐藏
+          </button>
+          <button 
+            className="batch-btn danger" 
+            onClick={handleBatchDelete}
+            disabled={selectedIds.size === 0}
+          >
+            🗑️ 批量删除
+          </button>
+        </div>
+      )}
+
       {/* 设置面板 */}
       <div className="settings-panel">
         <h3>⚙️ 设置</h3>
@@ -204,26 +342,34 @@ function Manager() {
       </div>
 
       {/* 便签列表 */}
-      {notes.length === 0 ? (
+      {filteredNotes.length === 0 ? (
         <div className="empty-state">
-          <span>📝</span>
-          <p>还没有便签，点击上方按钮创建一个吧！</p>
-          <button className="manager-btn primary" onClick={handleCreateNote}>
-            ➕ 新建便签
-          </button>
+          <span>{searchTerm ? "🔍" : "📝"}</span>
+          <p>{searchTerm ? `没有找到包含 "${searchTerm}" 的便签` : "还没有便签，点击上方按钮创建一个吧！"}</p>
+          {!searchTerm && (
+            <button className="manager-btn primary" onClick={handleCreateNote}>
+              ➕ 新建便签
+            </button>
+          )}
         </div>
       ) : (
         <div className="notes-grid">
-          {notes.map((note) => {
+          {filteredNotes.map((note) => {
             const theme = NOTE_THEMES[note.theme_index] || NOTE_THEMES[0];
-            const visible = isNoteVisible(note);
+            const visible = !note.closed;
+            const isSelected = selectedIds.has(note.id);
 
             return (
               <div
                 key={note.id}
-                className="note-card"
+                className={`note-card ${isSelected ? 'selected' : ''}`}
                 onClick={() => handleShowNote(note.id)}
               >
+                {selectMode && (
+                  <div className={`select-checkbox ${isSelected ? 'checked' : ''}`}>
+                    {isSelected && '✓'}
+                  </div>
+                )}
                 <div
                   className="note-card-header"
                   style={{ background: theme.header }}
@@ -245,41 +391,43 @@ function Manager() {
                   <span className="note-card-date">
                     {formatDate(note.created_at)}
                   </span>
-                  <div className="note-card-actions">
-                    {visible ? (
+                  {!selectMode && (
+                    <div className="note-card-actions">
+                      {visible ? (
+                        <button
+                          className="note-card-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleHideNote(note.id);
+                          }}
+                          title="隐藏"
+                        >
+                          🔽
+                        </button>
+                      ) : (
+                        <button
+                          className="note-card-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleShowNote(note.id);
+                          }}
+                          title="显示"
+                        >
+                          👁️
+                        </button>
+                      )}
                       <button
-                        className="note-card-btn"
+                        className="note-card-btn danger"
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleHideNote(note.id);
+                          handleDeleteNote(note.id);
                         }}
-                        title="隐藏"
+                        title="删除"
                       >
-                        🔽
+                        🗑️
                       </button>
-                    ) : (
-                      <button
-                        className="note-card-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShowNote(note.id);
-                        }}
-                        title="显示"
-                      >
-                        👁️
-                      </button>
-                    )}
-                    <button
-                      className="note-card-btn danger"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteNote(note.id);
-                      }}
-                      title="删除"
-                    >
-                      🗑️
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );

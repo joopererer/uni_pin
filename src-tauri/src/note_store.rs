@@ -54,7 +54,7 @@ pub struct NoteData {
 }
 
 fn default_always_on_top() -> bool {
-    true
+    false  // 默认不置顶
 }
 
 impl NoteData {

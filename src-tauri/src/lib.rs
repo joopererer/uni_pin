@@ -26,7 +26,7 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
             (data.size.width, data.size.height),
             data.always_on_top,
         ),
-        None => (generate_window_label(), None, (280.0, 320.0), true),
+        None => (generate_window_label(), None, (280.0, 320.0), false), // 默认不置顶
     };
 
     let mut builder = WebviewWindowBuilder::new(
@@ -225,15 +225,33 @@ fn get_all_notes(state: State<'_, NoteStoreState>) -> Vec<NoteData> {
 }
 
 #[tauri::command]
-fn hide_note(app: AppHandle, id: String) -> Result<(), String> {
+fn hide_note(app: AppHandle, state: State<'_, NoteStoreState>, id: String) -> Result<(), String> {
+    // 隐藏窗口
     if let Some(window) = app.get_webview_window(&id) {
         window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))?;
     }
+    
+    // 更新存储中的状态
+    let mut store = state.0.lock().unwrap();
+    if let Some(note) = store.notes.get_mut(&id) {
+        note.closed = true;
+        let _ = save_notes(&store);
+    }
+    
     Ok(())
 }
 
 #[tauri::command]
 fn show_note(app: AppHandle, state: State<'_, NoteStoreState>, id: String) -> Result<(), String> {
+    // 先更新存储中的状态
+    {
+        let mut store = state.0.lock().unwrap();
+        if let Some(note) = store.notes.get_mut(&id) {
+            note.closed = false;
+            let _ = save_notes(&store);
+        }
+    }
+    
     // 检查窗口是否存在
     if let Some(window) = app.get_webview_window(&id) {
         window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
@@ -490,17 +508,33 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
             let _ = create_manager_window(app);
         }
         "show_all" => {
-            for (label, window) in app.webview_windows() {
-                if label.starts_with("note-") {
-                    let _ = window.show();
+            // 显示所有便签并更新状态
+            if let Some(state) = app.try_state::<NoteStoreState>() {
+                let mut store = state.0.lock().unwrap();
+                for (label, window) in app.webview_windows() {
+                    if label.starts_with("note-") {
+                        let _ = window.show();
+                        if let Some(note) = store.notes.get_mut(&label) {
+                            note.closed = false;
+                        }
+                    }
                 }
+                let _ = save_notes(&store);
             }
         }
         "hide_all" => {
-            for (label, window) in app.webview_windows() {
-                if label.starts_with("note-") {
-                    let _ = window.hide();
+            // 隐藏所有便签并更新状态
+            if let Some(state) = app.try_state::<NoteStoreState>() {
+                let mut store = state.0.lock().unwrap();
+                for (label, window) in app.webview_windows() {
+                    if label.starts_with("note-") {
+                        let _ = window.hide();
+                        if let Some(note) = store.notes.get_mut(&label) {
+                            note.closed = true;
+                        }
+                    }
                 }
+                let _ = save_notes(&store);
             }
         }
         "quit" => {
