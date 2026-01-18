@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 
 // 预定义的便签颜色主题
 const NOTE_THEMES = [
@@ -11,72 +12,163 @@ const NOTE_THEMES = [
   { name: "purple", bg: "#e1bee7", header: "#ba68c8", text: "#4a148c" },
 ];
 
+// Rust 返回的便签数据类型
+interface NoteData {
+  id: string;
+  content: string;
+  theme_index: number;
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  closed: boolean;
+}
+
 interface NoteProps {
   noteId: string;
 }
 
 function Note({ noteId }: NoteProps) {
   const [themeIndex, setThemeIndex] = useState(0);
+  const [isLoaded, setIsLoaded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const saveTimeoutRef = useRef<number | null>(null);
 
   const theme = NOTE_THEMES[themeIndex];
 
-  // 加载保存的内容和主题
+  // 从 Rust 后端加载保存的数据
   useEffect(() => {
-    const savedContent = localStorage.getItem(`note-content-${noteId}`);
-    const savedTheme = localStorage.getItem(`note-theme-${noteId}`);
-    
-    if (savedContent && contentRef.current) {
-      contentRef.current.innerHTML = savedContent;
-    }
-    if (savedTheme) {
-      const idx = parseInt(savedTheme, 10);
-      if (!isNaN(idx) && idx >= 0 && idx < NOTE_THEMES.length) {
-        setThemeIndex(idx);
+    const loadNote = async () => {
+      try {
+        const data = await invoke<NoteData | null>("get_note", { id: noteId });
+        if (data && contentRef.current) {
+          contentRef.current.innerHTML = data.content || "";
+          setThemeIndex(data.theme_index || 0);
+        }
+        setIsLoaded(true);
+      } catch (e) {
+        console.error("加载便签数据失败:", e);
+        setIsLoaded(true);
       }
-    }
+    };
+    loadNote();
   }, [noteId]);
 
-  // 保存内容
-  const saveContent = useCallback(() => {
-    if (contentRef.current) {
-      localStorage.setItem(`note-content-${noteId}`, contentRef.current.innerHTML);
+  // 防抖保存到 Rust 后端
+  const saveToBackend = useCallback(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
-  }, [noteId]);
+    
+    saveTimeoutRef.current = window.setTimeout(async () => {
+      try {
+        const content = contentRef.current?.innerHTML || "";
+        await invoke("save_note", {
+          id: noteId,
+          content,
+          themeIndex,
+        });
+      } catch (e) {
+        console.error("保存便签失败:", e);
+      }
+    }, 500); // 500ms 防抖
+  }, [noteId, themeIndex]);
 
-  // 保存主题
+  // 内容变化时保存
+  const handleContentChange = useCallback(() => {
+    saveToBackend();
+  }, [saveToBackend]);
+
+  // 主题变化时保存
   useEffect(() => {
-    localStorage.setItem(`note-theme-${noteId}`, themeIndex.toString());
-  }, [themeIndex, noteId]);
+    if (isLoaded) {
+      saveToBackend();
+    }
+  }, [themeIndex, isLoaded, saveToBackend]);
+
+  // 监听窗口位置变化
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let lastPosition = { x: 0, y: 0 };
+    let positionTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unlistenMove = appWindow.onMoved(({ payload }) => {
+      const { x, y } = payload;
+      // 防抖保存位置
+      if (positionTimeout) clearTimeout(positionTimeout);
+      positionTimeout = setTimeout(async () => {
+        if (x !== lastPosition.x || y !== lastPosition.y) {
+          lastPosition = { x, y };
+          try {
+            await invoke("update_note_position", { id: noteId, x, y });
+          } catch (e) {
+            console.error("保存位置失败:", e);
+          }
+        }
+      }, 300);
+    });
+
+    return () => {
+      unlistenMove.then((fn) => fn());
+      if (positionTimeout) clearTimeout(positionTimeout);
+    };
+  }, [noteId]);
+
+  // 监听窗口大小变化
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    let lastSize = { width: 0, height: 0 };
+    let sizeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const unlistenResize = appWindow.onResized(({ payload }) => {
+      const { width, height } = payload;
+      // 防抖保存大小
+      if (sizeTimeout) clearTimeout(sizeTimeout);
+      sizeTimeout = setTimeout(async () => {
+        if (width !== lastSize.width || height !== lastSize.height) {
+          lastSize = { width, height };
+          try {
+            await invoke("update_note_size", { id: noteId, width, height });
+          } catch (e) {
+            console.error("保存大小失败:", e);
+          }
+        }
+      }, 300);
+    });
+
+    return () => {
+      unlistenResize.then((fn) => fn());
+      if (sizeTimeout) clearTimeout(sizeTimeout);
+    };
+  }, [noteId]);
 
   // 处理粘贴事件 - 支持图片粘贴
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      
-      // 检查是否是图片
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) {
-          insertImage(file);
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+
+        if (item.type.startsWith("image/")) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            insertImage(file);
+          }
+          return;
         }
-        return;
       }
-    }
-  }, []);
+    },
+    []
+  );
 
   // 插入图片到编辑器
   const insertImage = (file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const base64 = e.target?.result as string;
-      
-      // 创建图片元素
+
       const img = document.createElement("img");
       img.src = base64;
       img.className = "note-image";
@@ -84,18 +176,20 @@ function Note({ noteId }: NoteProps) {
       img.style.borderRadius = "4px";
       img.style.margin = "8px 0";
       img.style.cursor = "pointer";
-      
-      // 点击图片可删除
+
       img.onclick = () => {
         if (confirm("删除这张图片？")) {
           img.remove();
-          saveContent();
+          handleContentChange();
         }
       };
 
-      // 插入到光标位置或末尾
       const selection = window.getSelection();
-      if (selection && selection.rangeCount > 0 && contentRef.current?.contains(selection.anchorNode)) {
+      if (
+        selection &&
+        selection.rangeCount > 0 &&
+        contentRef.current?.contains(selection.anchorNode)
+      ) {
         const range = selection.getRangeAt(0);
         range.deleteContents();
         range.insertNode(img);
@@ -107,7 +201,7 @@ function Note({ noteId }: NoteProps) {
         contentRef.current.appendChild(img);
       }
 
-      saveContent();
+      handleContentChange();
     };
     reader.readAsDataURL(file);
   };
@@ -118,15 +212,19 @@ function Note({ noteId }: NoteProps) {
     if (file && file.type.startsWith("image/")) {
       insertImage(file);
     }
-    // 重置 input 以便可以重复选择同一文件
     e.target.value = "";
   };
 
-  // 窗口操作
+  // 窗口操作 - 关闭时删除便签
   const handleClose = async () => {
-    saveContent();
-    const window = getCurrentWindow();
-    await window.close();
+    try {
+      await invoke("delete_note", { id: noteId });
+    } catch (e) {
+      console.error("删除便签失败:", e);
+      // 备用方案：直接关闭窗口
+      const window = getCurrentWindow();
+      await window.close();
+    }
   };
 
   const handleMinimize = async () => {
@@ -142,11 +240,13 @@ function Note({ noteId }: NoteProps) {
   return (
     <div
       className="note-container"
-      style={{
-        "--note-bg": theme.bg,
-        "--note-header": theme.header,
-        "--note-text": theme.text,
-      } as React.CSSProperties}
+      style={
+        {
+          "--note-bg": theme.bg,
+          "--note-header": theme.header,
+          "--note-text": theme.text,
+        } as React.CSSProperties
+      }
     >
       {/* 极简拖拽把手 */}
       <div className="note-header" data-tauri-drag-region>
@@ -155,7 +255,7 @@ function Note({ noteId }: NoteProps) {
           <span data-tauri-drag-region></span>
           <span data-tauri-drag-region></span>
         </div>
-        
+
         {/* 工具栏 */}
         <div className="note-toolbar">
           {/* 添加图片按钮 */}
@@ -166,13 +266,9 @@ function Note({ noteId }: NoteProps) {
           >
             🖼️
           </button>
-          
+
           {/* 颜色选择 */}
-          <button
-            className="toolbar-btn"
-            onClick={cycleTheme}
-            title="切换颜色"
-          >
+          <button className="toolbar-btn" onClick={cycleTheme} title="切换颜色">
             🎨
           </button>
 
@@ -211,8 +307,8 @@ function Note({ noteId }: NoteProps) {
         className="note-content"
         contentEditable
         onPaste={handlePaste}
-        onInput={saveContent}
-        onBlur={saveContent}
+        onInput={handleContentChange}
+        onBlur={handleContentChange}
         data-placeholder="输入便签内容... 支持 Ctrl+V 粘贴图片"
         suppressContentEditableWarning
       />
