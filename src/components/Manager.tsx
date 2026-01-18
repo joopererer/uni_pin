@@ -88,15 +88,22 @@ function Manager() {
   }, [loadNotes, loadSettings]);
 
   // 创建新便签
-  const handleCreateNote = async () => {
+  const handleCreateNote = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
     try {
-      await invoke<string>("create_note_window");
-      // 等待一下再刷新，让窗口有时间创建
-      setTimeout(async () => {
-        await loadNotes();
-      }, 300);
+      console.log("创建新便签...");
+      const label = await invoke<string>("create_note_window");
+      console.log("创建成功，窗口标签:", label);
+      // 等待窗口创建和初始化完成
+      setTimeout(() => {
+        loadNotes();
+      }, 800);
     } catch (e) {
       console.error("创建便签失败:", e);
+      alert("创建便签失败: " + e);
     }
   };
 
@@ -240,17 +247,23 @@ function Manager() {
   };
 
   // 批量显示
-  const handleBatchShow = async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleBatchShow = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
     if (selectedIds.size === 0) {
-      return; // 按钮已禁用，不应该触发
+      return;
     }
     try {
       const ids = Array.from(selectedIds);
+      console.log("批量显示便签:", ids);
       for (const id of ids) {
+        console.log("显示便签:", id);
         await invoke("show_note", { id });
       }
-      await loadNotes();
+      // 等待一下再刷新
+      setTimeout(() => {
+        loadNotes();
+      }, 500);
     } catch (err) {
       console.error("批量显示失败:", err);
       alert("批量显示失败: " + err);
@@ -258,17 +271,23 @@ function Manager() {
   };
 
   // 批量隐藏
-  const handleBatchHide = async (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleBatchHide = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
     if (selectedIds.size === 0) {
-      return; // 按钮已禁用，不应该触发
+      return;
     }
     try {
       const ids = Array.from(selectedIds);
+      console.log("批量隐藏便签:", ids);
       for (const id of ids) {
+        console.log("隐藏便签:", id);
         await invoke("hide_note", { id });
       }
-      await loadNotes();
+      // 等待一下再刷新
+      setTimeout(() => {
+        loadNotes();
+      }, 500);
     } catch (err) {
       console.error("批量隐藏失败:", err);
       alert("批量隐藏失败: " + err);
