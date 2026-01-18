@@ -25,7 +25,7 @@ pub fn get_current_version() -> &'static str {
 /// 检查更新
 pub async fn check_for_updates() -> Result<Option<GitHubRelease>, String> {
     let current_version = get_current_version();
-    let repo = "joopererer/uni_stick"; // GitHub 仓库
+    let repo = "joopererer/uni_pin"; // GitHub 仓库
 
     let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
     
@@ -37,7 +37,7 @@ pub async fn check_for_updates() -> Result<Option<GitHubRelease>, String> {
     
     let response = client
         .get(&url)
-        .header("User-Agent", "UniStick-Updater")
+        .header("User-Agent", "UniPin-Updater")
         .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await

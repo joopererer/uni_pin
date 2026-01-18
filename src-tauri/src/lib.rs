@@ -85,7 +85,7 @@ fn create_manager_window(app: &AppHandle) -> Result<(), String> {
         "manager",
         WebviewUrl::App("manager.html".into()),
     )
-    .title("UniStick 管理中心")
+    .title("管理中心") // 标题将通过 i18n 在前端设置
     .inner_size(600.0, 500.0)
     .min_inner_size(400.0, 300.0)
     .decorations(true)
@@ -373,6 +373,30 @@ fn get_auto_start(state: State<'_, NoteStoreState>) -> bool {
     store.settings.auto_start
 }
 
+/// 获取语言设置
+#[tauri::command]
+fn get_language(state: State<'_, NoteStoreState>) -> String {
+    let store = state.0.lock().unwrap();
+    store.settings.language.clone()
+}
+
+/// 设置语言
+#[tauri::command]
+fn set_language(state: State<'_, NoteStoreState>, language: String) -> Result<(), String> {
+    // 验证语言代码
+    if language != "zh" && language != "en" {
+        return Err("不支持的语言代码，仅支持 zh 和 en".to_string());
+    }
+    
+    {
+        let mut store = state.0.lock().unwrap();
+        store.settings.language = language;
+        save_notes(&store)?;
+    }
+    
+    Ok(())
+}
+
 /// 检查更新
 #[tauri::command]
 async fn check_update() -> Result<Option<serde_json::Value>, String> {
@@ -422,7 +446,7 @@ fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(),
                     .args([
                         "add",
                         r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                        "/v", "UniStick", // 更新为 UniStick
+                        "/v", "UniPin",
                         "/t", "REG_SZ",
                         "/d", &exe_path,
                         "/f"
@@ -444,7 +468,7 @@ fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(),
                     .args([
                         "delete",
                         r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                        "/v", "UniStick", // 更新为 UniStick
+                        "/v", "UniPin",
                         "/f"
                     ])
                     .output();
@@ -534,7 +558,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let _tray = TrayIconBuilder::new()
         .icon(icon)
         .menu(&menu)
-        .tooltip("UniStick - 点击打开管理中心")
+        .tooltip("UniPin - 点击打开管理中心")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id.as_ref());
@@ -638,6 +662,8 @@ pub fn run() {
             save_image,
             get_auto_start,
             set_auto_start,
+            get_language,
+            set_language,
             check_update
         ])
         .setup(|app| {
@@ -679,7 +705,7 @@ pub fn run() {
                 });
             });
             
-            println!("✨ UniStick 已启动！");
+            println!("✨ UniPin 已启动！");
             Ok(())
         })
         .run(tauri::generate_context!())

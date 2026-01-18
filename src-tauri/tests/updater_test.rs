@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod updater_tests {
-    use uni_stick_lib::updater;
+    use uni_pin_lib::updater;
 
     #[test]
     fn test_get_current_version() {

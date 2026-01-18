@@ -1,12 +1,12 @@
 [package]
-name = "uni-stick"
+name = "uni-pin"
 version = "0.1.0"
-description = "UniStick - A Tauri-based sticky notes application"
+description = "UniPin - A Tauri-based sticky notes application"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "uni_stick_lib"
+name = "uni_pin_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

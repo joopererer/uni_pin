@@ -77,11 +77,27 @@ impl NoteData {
 }
 
 /// 应用设置
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     /// 开机自启动
     #[serde(default)]
     pub auto_start: bool,
+    /// 界面语言 (zh, en)
+    #[serde(default = "default_language")]
+    pub language: String,
+}
+
+fn default_language() -> String {
+    "zh".to_string()
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            auto_start: false,
+            language: "zh".to_string(),
+        }
+    }
 }
 
 /// 所有便签数据的存储结构
@@ -99,7 +115,7 @@ pub struct NoteStoreState(pub Mutex<NotesStore>);
 pub fn get_data_dir() -> PathBuf {
     let data_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("sticky-notes");
+        .join("UniPin");
     
     // 确保目录存在
     if !data_dir.exists() {

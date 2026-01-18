@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import ConfirmDialog from "./ConfirmDialog";
 import AboutDialog from "./AboutDialog";
 import UpdateDialog from "./UpdateDialog";
+import { useI18n } from "../hooks/useI18n";
 
 const NOTE_THEMES = [
   { name: "yellow", bg: "#fff9c4", header: "#ffee58" },

@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "UniStick",
+  "productName": "UniPin",
   "version": "0.1.0",
-  "identifier": "com.unistick.desktop",
+  "identifier": "com.unipin.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
