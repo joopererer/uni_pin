@@ -442,46 +442,88 @@ body,
 }
 
 .language-select {
-  padding: 6px 12px;
+  padding: 8px 14px;
   border: 2px solid rgba(255, 255, 255, 0.3);
-  border-radius: 6px;
-  background: #5d4037;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.15);
   color: white;
   font-size: 14px;
   cursor: pointer;
   transition: all 0.2s;
+  backdrop-filter: blur(10px);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='white' d='M6 8L0 0h12z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+  min-width: 120px;
 }
 
 .language-select:hover {
-  border-color: #4caf50;
-  background: #5d4037;
+  border-color: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .language-select:focus {
   outline: none;
   border-color: #4caf50;
-  background: #5d4037;
-  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.2);
 }
 
 /* 语言选择器的选项样式 */
-/* 未选中的选项 - 默认灰色/褐色底色 */
+/* 未选中的选项 - 灰色/褐色底色 */
 .language-select option {
-  background: #5d4037;
+  background: #8d7a95;
   color: white;
-  padding: 8px;
+  padding: 10px 12px;
+  border: none;
 }
 
-/* 选中的选项 - 绿色背景 */
+/* 选中的选项 - 灰色/褐色底色 */
 .language-select option:checked {
-  background: #4caf50;
+  background: #8d7a95;
   color: white;
+  font-weight: 500;
 }
 
 /* 鼠标悬停时的选项 - 绿色背景 */
 .language-select option:hover {
-  background: #4caf50;
+  background: #4caf50 !important;
   color: white;
+}
+
+/* 下拉菜单打开时的样式调整 */
+.language-select:active {
+  border-color: #4caf50;
+}
+
+/* 确保下拉选项在打开时正确显示 */
+.language-select option {
+  background-color: #8d7a95;
+}
+
+.language-select option:checked {
+  background-color: #8d7a95;
+}
+
+/* 兼容性：针对不同浏览器的选项样式 */
+.language-select::-ms-expand {
+  display: none;
+}
+
+/* Firefox 下拉箭头隐藏 */
+.language-select {
+  text-indent: 0.01px;
+  text-overflow: '';
+}
+
+@-moz-document url-prefix() {
+  .language-select {
+    text-indent: 0;
+  }
 }
 
 /* Toggle 开关 */

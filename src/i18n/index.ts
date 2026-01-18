@@ -49,6 +49,7 @@ export interface Translations {
     delete: string;
     alwaysOnTop: string;
     cancelAlwaysOnTop: string;
+    imageSaveFailed: string;
     contextMenu: {
       pin: string;
       unpin: string;
@@ -146,6 +147,7 @@ const translations: Record<Language, Translations> = {
       delete: '删除便签',
       alwaysOnTop: '置顶窗口',
       cancelAlwaysOnTop: '取消置顶',
+      imageSaveFailed: '保存图片失败，请重试',
       contextMenu: {
         pin: '置顶窗口',
         unpin: '取消置顶',
@@ -237,6 +239,7 @@ const translations: Record<Language, Translations> = {
       delete: 'Delete Note',
       alwaysOnTop: 'Always on Top',
       cancelAlwaysOnTop: 'Cancel Always on Top',
+      imageSaveFailed: 'Failed to save image, please try again',
       contextMenu: {
         pin: 'Pin Window',
         unpin: 'Cancel Pin',

@@ -9,7 +9,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, LogicalPosition, LogicalSize,
 };
-use image::GenericImageView;
+use image::{GenericImageView, ImageEncoder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use uuid::Uuid;
@@ -326,6 +326,114 @@ fn get_all_note_windows(app: AppHandle) -> Vec<String> {
         .collect()
 }
 
+/// 从 Windows 剪贴板读取图片
+#[tauri::command]
+fn get_clipboard_image() -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::System::DataExchange::*;
+        use windows::Win32::System::Memory::*;
+        use windows::Win32::Foundation::HGLOBAL;
+        
+        unsafe {
+            // 打开剪贴板
+            if OpenClipboard(None).is_err() {
+                return Ok(None);
+            }
+            
+            let result = {
+                // 检查是否有 DIB 格式（Windows 位图）
+                // CF_DIB = 8
+                let h_dib_result = GetClipboardData(8u32);
+                if h_dib_result.is_err() {
+                    let _ = CloseClipboard();
+                    return Ok(None);
+                }
+                
+                let h_dib_handle = h_dib_result.unwrap();
+                // 将 HANDLE 转换为 HGLOBAL（HANDLE 是 isize，HGLOBAL 是 *mut c_void）
+                let h_dib = HGLOBAL(h_dib_handle.0 as *mut std::ffi::c_void);
+                let ptr = GlobalLock(h_dib);
+                if ptr.is_null() {
+                    let _ = CloseClipboard();
+                    return Ok(None);
+                }
+                
+                let size = GlobalSize(h_dib) as usize;
+                if size < 40 {
+                    // DIB 头至少需要 40 字节
+                    let _ = GlobalUnlock(h_dib);
+                    let _ = CloseClipboard();
+                    return Ok(None);
+                }
+                
+                let dib_data = std::slice::from_raw_parts(ptr as *const u8, size);
+                
+                // 读取 BITMAPINFOHEADER 来确定偏移
+                let header_size = u32::from_le_bytes([dib_data[0], dib_data[1], dib_data[2], dib_data[3]]);
+                let offset = if header_size == 124 { 124 } else { 40 }; // DIBV5 or DIB
+                
+                // 构造 BMP 文件头（14 字节）
+                let mut bmp_data = Vec::with_capacity(size + 14);
+                bmp_data.extend_from_slice(b"BM");
+                let file_size = (size + 14) as u32;
+                bmp_data.extend_from_slice(&file_size.to_le_bytes());
+                bmp_data.extend_from_slice(&[0u8; 4]); // reserved
+                bmp_data.extend_from_slice(&((offset + 14) as u32).to_le_bytes()); // offset to pixel data
+                bmp_data.extend_from_slice(dib_data);
+                
+                let _ = GlobalUnlock(h_dib);
+                
+                // 使用 image crate 加载图片
+                match image::load_from_memory(&bmp_data) {
+                    Ok(img) => {
+                        // 限制最大尺寸
+                        let max_size = 800;
+                        let (w, h) = img.dimensions();
+                        let processed_img = if w > max_size || h > max_size {
+                            let ratio = (max_size as f32 / w.max(h) as f32).min(1.0);
+                            let new_width = (w as f32 * ratio) as u32;
+                            let new_height = (h as f32 * ratio) as u32;
+                            img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
+                        } else {
+                            img
+                        };
+                        
+                        // 编码为 PNG bytes
+                        let mut png_bytes = Vec::new();
+                        {
+                            let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+                            encoder.write_image(
+                                processed_img.as_bytes(),
+                                processed_img.width(),
+                                processed_img.height(),
+                                processed_img.color(),
+                            )
+                            .map_err(|e| format!("编码 PNG 失败: {}", e))?;
+                        }
+                        
+                        // 转换为 base64
+                        let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                        Some(format!("data:image/png;base64,{}", base64_data))
+                    }
+                    Err(e) => {
+                        eprintln!("加载剪贴板图片失败: {}", e);
+                        None
+                    }
+                }
+            };
+            
+            let _ = CloseClipboard();
+            Ok(result)
+        }
+    }
+    
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(None)
+    }
+}
+
 /// 保存图片到 AppData 目录（带压缩）
 #[tauri::command]
 fn save_image(image_data: String) -> Result<String, String> {
@@ -613,6 +721,7 @@ pub fn run() {
             get_window_size,
             get_all_note_windows,
             save_image,
+            get_clipboard_image,
             get_auto_start,
             set_auto_start,
             get_language,

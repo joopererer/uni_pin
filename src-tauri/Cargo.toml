@@ -25,6 +25,12 @@ dirs = "5"
 base64 = "0.21"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
+windows = { version = "0.54", features = [
+    "Win32_System_DataExchange",
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Memory",
+] }
 
 [profile.release]
 panic = "abort"

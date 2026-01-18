@@ -97,16 +97,50 @@ function Note({ noteId }: NoteProps) {
     
     const images = contentRef.current.querySelectorAll('img');
     images.forEach((img) => {
+      // 检查图片路径是否需要转换
+      const src = img.src;
+      const dataPath = img.getAttribute("data-image-path");
+      
+      // 优先使用 data-image-path 属性（如果存在）
+      if (dataPath) {
+        try {
+          img.src = convertFileSrc(dataPath);
+          return; // 已处理，继续下一个
+        } catch (e) {
+          console.error("转换图片路径失败:", e);
+        }
+      }
+      
       // 如果图片路径是 file:// 开头的，需要转换为 convertFileSrc
-      if (img.src.startsWith('file://')) {
+      if (src.startsWith('file://')) {
         try {
           // 提取原始文件路径（去除 file:// 前缀）
-          const filePath = img.src.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
+          const filePath = src.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
           // 在 Windows 上，路径可能包含驱动器字母，需要特殊处理
           const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
           img.src = convertFileSrc(normalizedPath);
+          // 保存原始路径到 data 属性
+          img.setAttribute("data-image-path", normalizedPath);
         } catch (e) {
           console.error("转换图片路径失败:", e);
+        }
+      }
+      // 如果图片路径是 Tauri 临时 URL（http://localhost），尝试从 src 提取路径
+      else if (src.includes('__tauri') || src.includes('localhost')) {
+        // Tauri URL 格式：http://localhost:PORT/__tauri_xxx/path/to/file.jpg
+        // 我们需要重新生成正确的 URL，但保留原始路径信息
+        // 这种情况下，图片路径应该在 HTML 中以某种方式保存
+        // 如果 data-image-path 不存在，尝试从 src 中提取
+        const urlMatch = src.match(/__tauri[^\/]+\/(.+)$/);
+        if (urlMatch && urlMatch[1]) {
+          // 解码路径
+          const decodedPath = decodeURIComponent(urlMatch[1]);
+          try {
+            img.src = convertFileSrc(decodedPath);
+            img.setAttribute("data-image-path", decodedPath);
+          } catch (e) {
+            console.error("从 Tauri URL 提取路径失败:", e);
+          }
         }
       }
       
@@ -159,6 +193,46 @@ function Note({ noteId }: NoteProps) {
     loadNoteAndShow();
   }, [noteId, fixSavedImages]);
 
+  // 处理图片路径，保存原始路径到 data 属性
+  const normalizeImagePaths = useCallback((html: string): string => {
+    if (!html) return html;
+    
+    // 创建临时容器来解析 HTML
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = html;
+    
+    const images = tempDiv.querySelectorAll('img');
+    images.forEach((img) => {
+      const src = img.src;
+      
+      // 如果图片有 data-image-path，保持不变
+      if (img.getAttribute("data-image-path")) {
+        return;
+      }
+      
+      // 如果图片路径是 Tauri URL，尝试提取原始路径
+      if (src.includes('__tauri') || src.includes('localhost')) {
+        const urlMatch = src.match(/__tauri[^\/]+\/(.+)$/);
+        if (urlMatch && urlMatch[1]) {
+          const decodedPath = decodeURIComponent(urlMatch[1]);
+          img.setAttribute("data-image-path", decodedPath);
+        }
+      }
+      // 如果图片路径是 file://，提取路径
+      else if (src.startsWith('file://')) {
+        const filePath = src.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
+        const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+        img.setAttribute("data-image-path", normalizedPath);
+      }
+      // 如果是 base64，不处理（不应该出现，因为我们已经移除了 base64 回退）
+      else if (src.startsWith('data:')) {
+        console.warn("发现 base64 图片，这不应该发生");
+      }
+    });
+    
+    return tempDiv.innerHTML;
+  }, []);
+
   // 防抖保存
   const saveToBackend = useCallback(() => {
     if (saveTimeoutRef.current) {
@@ -167,13 +241,15 @@ function Note({ noteId }: NoteProps) {
     
     saveTimeoutRef.current = setTimeout(async () => {
       try {
-        const content = contentRef.current?.innerHTML || "";
+        let content = contentRef.current?.innerHTML || "";
+        // 在保存前规范化图片路径
+        content = normalizeImagePaths(content);
         await invoke("save_note", { id: noteId, content, themeIndex });
       } catch (e) {
         console.error("保存便签失败:", e);
       }
     }, 500);
-  }, [noteId, themeIndex]);
+  }, [noteId, themeIndex, normalizeImagePaths]);
 
   const handleContentChange = useCallback(() => {
     saveToBackend();
@@ -232,18 +308,85 @@ function Note({ noteId }: NoteProps) {
   // 处理粘贴事件
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
-    if (!items) return;
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      if (item.type.startsWith("image/")) {
-        e.preventDefault();
-        const file = item.getAsFile();
-        if (file) {
-          await insertImage(file);
-        }
-        return;
+    let foundImage = false;
+    
+    // 调试：打印所有剪贴板项目
+    if (items && items.length > 0) {
+      console.log("剪贴板项目数量:", items.length);
+      for (let i = 0; i < items.length; i++) {
+        console.log(`项目 ${i}: type="${items[i].type}", kind="${items[i].kind}"`);
       }
+    }
+    
+    // 先尝试使用浏览器的 Clipboard API 检测图片
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const type = item.type.toLowerCase();
+        
+        // 检查是否是图片类型（扩展检测范围）
+        if (item.kind === "file" && (
+          type.startsWith("image/") ||
+          type.includes("png") ||
+          type.includes("jpeg") ||
+          type.includes("jpg") ||
+          type.includes("gif") ||
+          type.includes("webp")
+        )) {
+          // 找到图片时才阻止默认行为
+          e.preventDefault();
+          try {
+            const file = item.getAsFile();
+            if (file && file.size > 0) {
+              console.log("从浏览器剪贴板读取到图片文件:", {
+                name: file.name || "未命名",
+                type: file.type,
+                size: file.size
+              });
+              await insertImage(file);
+              foundImage = true;
+              return;
+            }
+          } catch (err) {
+            console.error("读取图片文件失败:", err);
+            // 如果读取失败，不阻止默认行为，让文本继续粘贴
+            foundImage = false;
+          }
+        }
+      }
+    }
+    
+    // 如果浏览器 API 没有找到图片，尝试使用 Windows 系统剪贴板 API
+    // 只有在确认可能包含图片时才调用（避免不必要的 API 调用影响文本粘贴）
+    if (!foundImage) {
+      // 检查是否可能是图片（检查是否有文件类型但浏览器 API 没识别）
+      const hasFileType = items && Array.from(items).some(item => item.kind === "file");
+      
+      if (hasFileType) {
+        // 只有在有文件类型时才尝试 Windows API
+        try {
+          console.log("尝试使用 Windows 系统剪贴板 API...");
+          const clipboardImage = await invoke<string | null>("get_clipboard_image");
+          if (clipboardImage) {
+            e.preventDefault();
+            console.log("从 Windows 剪贴板读取到图片");
+            // 将 base64 数据转换为 Blob 并插入
+            const response = await fetch(clipboardImage);
+            const blob = await response.blob();
+            const file = new File([blob], "clipboard-image.png", { type: "image/png" });
+            await insertImage(file);
+            foundImage = true;
+            return;
+          }
+        } catch (err) {
+          console.error("从 Windows 剪贴板读取图片失败:", err);
+        }
+      }
+    }
+    
+    // 如果没有找到图片，不调用 preventDefault，让文本正常粘贴
+    if (!foundImage) {
+      console.log("未找到图片，允许默认粘贴行为（文本等）");
     }
   }, []);
 
@@ -259,6 +402,8 @@ function Note({ noteId }: NoteProps) {
         const img = document.createElement("img");
         // 使用 convertFileSrc 转换文件路径为可访问的 URL
         img.src = convertFileSrc(savedPath);
+        // 保存原始文件路径作为 data 属性，方便后续处理
+        img.setAttribute("data-image-path", savedPath);
         img.className = "note-image";
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
@@ -285,33 +430,8 @@ function Note({ noteId }: NoteProps) {
         handleContentChange();
       } catch (err) {
         console.error("保存图片失败:", err);
-        // 如果保存失败，使用 base64 直接显示
-        const img = document.createElement("img");
-        img.src = base64;
-        img.className = "note-image";
-        img.style.maxWidth = "100%";
-        img.style.borderRadius = "4px";
-        img.style.margin = "8px 0";
-        img.style.cursor = "pointer";
-        img.onclick = () => {
-          setImageToDelete(img);
-          setShowDeleteImageConfirm(true);
-        };
-        if (contentRef.current) {
-          const selection = window.getSelection();
-          if (selection && selection.rangeCount > 0 && contentRef.current.contains(selection.anchorNode)) {
-            const range = selection.getRangeAt(0);
-            range.deleteContents();
-            range.insertNode(img);
-            range.setStartAfter(img);
-            range.collapse(true);
-            selection.removeAllRanges();
-            selection.addRange(range);
-          } else {
-            contentRef.current.appendChild(img);
-          }
-        }
-        handleContentChange();
+        // 如果保存失败，显示错误提示，不插入图片
+        alert(t("note.imageSaveFailed") || "保存图片失败，请重试");
       }
     };
     reader.readAsDataURL(file);
