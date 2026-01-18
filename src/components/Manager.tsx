@@ -38,6 +38,8 @@ function Manager() {
   const [deleteNoteId, setDeleteNoteId] = useState<string | null>(null);
   const [showBatchDeleteConfirm, setShowBatchDeleteConfirm] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showUpdate, setShowUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{ version: string; url: string; notes?: string } | null>(null);
 
   // 加载所有便签
   const loadNotes = useCallback(async () => {
@@ -564,7 +566,11 @@ function Manager() {
           try {
             const result = await invoke<{ version: string; downloadUrl: string; notes?: string } | null>("check_update");
             if (result) {
-              setUpdateInfo(result);
+              setUpdateInfo({
+                version: result.version,
+                url: result.downloadUrl,
+                notes: result.notes,
+              });
               setShowUpdate(true);
               setShowAbout(false);
             } else {

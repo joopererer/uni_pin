@@ -1,5 +1,5 @@
 mod note_store;
-mod updater;
+pub mod updater;
 
 use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir};
 use updater::{check_for_updates, GitHubRelease};

@@ -7,7 +7,7 @@ interface AboutDialogProps {
   onCheckUpdate?: () => void;
 }
 
-export default function AboutDialog({ open: openDialog, onClose, version, onCheckUpdate }: AboutDialogProps) {
+export default function AboutDialog({ open: openDialog, onClose, version, onCheckUpdate: _onCheckUpdate }: AboutDialogProps) {
   const handleFeedback = async () => {
     try {
       const mailto = "mailto:joopererer@gmail.com?subject=UniStick%20反馈&body=请在此输入您的反馈意见...";
@@ -64,6 +64,11 @@ export default function AboutDialog({ open: openDialog, onClose, version, onChec
             <button className="about-feedback-btn" onClick={handleFeedback}>
               💬 反馈建议
             </button>
+            {_onCheckUpdate && (
+              <button className="about-feedback-btn" onClick={_onCheckUpdate} style={{ marginTop: "8px" }}>
+                🔄 检查更新
+              </button>
+            )}
           </div>
           <div className="about-dialog-footer">
             <p>© 2026 UniStick 保留所有权利</p>

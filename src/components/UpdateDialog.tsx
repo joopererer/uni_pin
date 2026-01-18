@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-shell";
 
 interface UpdateDialogProps {
@@ -43,19 +42,6 @@ export default function UpdateDialog({
     }
   };
 
-  const handleCheckUpdate = async () => {
-    try {
-      const result = await invoke<{ version: string; downloadUrl: string } | null>("check_update");
-      if (result) {
-        // 显示更新提示
-      } else {
-        alert("已是最新版本！");
-      }
-    } catch (e) {
-      console.error("检查更新失败:", e);
-      alert("检查更新失败，请稍后重试");
-    }
-  };
 
   if (!openDialog) return null;
 
