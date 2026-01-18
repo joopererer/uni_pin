@@ -31,13 +31,13 @@ function Note({ noteId }: NoteProps) {
   const [isLoaded, setIsLoaded] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const saveTimeoutRef = useRef<number | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const theme = NOTE_THEMES[themeIndex];
 
-  // 从 Rust 后端加载保存的数据
+  // 从 Rust 后端加载保存的数据，然后显示窗口
   useEffect(() => {
-    const loadNote = async () => {
+    const loadNoteAndShow = async () => {
       try {
         const data = await invoke<NoteData | null>("get_note", { id: noteId });
         if (data && contentRef.current) {
@@ -45,12 +45,19 @@ function Note({ noteId }: NoteProps) {
           setThemeIndex(data.theme_index || 0);
         }
         setIsLoaded(true);
+        
+        // 数据加载完成后，显示窗口
+        await invoke("show_note_window", { id: noteId });
       } catch (e) {
         console.error("加载便签数据失败:", e);
         setIsLoaded(true);
+        // 即使加载失败也显示窗口
+        try {
+          await invoke("show_note_window", { id: noteId });
+        } catch {}
       }
     };
-    loadNote();
+    loadNoteAndShow();
   }, [noteId]);
 
   // 防抖保存到 Rust 后端
@@ -59,7 +66,7 @@ function Note({ noteId }: NoteProps) {
       clearTimeout(saveTimeoutRef.current);
     }
     
-    saveTimeoutRef.current = window.setTimeout(async () => {
+    saveTimeoutRef.current = setTimeout(async () => {
       try {
         const content = contentRef.current?.innerHTML || "";
         await invoke("save_note", {
@@ -70,7 +77,7 @@ function Note({ noteId }: NoteProps) {
       } catch (e) {
         console.error("保存便签失败:", e);
       }
-    }, 500); // 500ms 防抖
+    }, 500);
   }, [noteId, themeIndex]);
 
   // 内容变化时保存
@@ -85,24 +92,21 @@ function Note({ noteId }: NoteProps) {
     }
   }, [themeIndex, isLoaded, saveToBackend]);
 
-  // 监听窗口位置变化
+  // 监听窗口位置变化 - 使用逻辑坐标
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    let lastPosition = { x: 0, y: 0 };
     let positionTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    const unlistenMove = appWindow.onMoved(({ payload }) => {
-      const { x, y } = payload;
+    const unlistenMove = appWindow.onMoved(async () => {
       // 防抖保存位置
       if (positionTimeout) clearTimeout(positionTimeout);
       positionTimeout = setTimeout(async () => {
-        if (x !== lastPosition.x || y !== lastPosition.y) {
-          lastPosition = { x, y };
-          try {
-            await invoke("update_note_position", { id: noteId, x, y });
-          } catch (e) {
-            console.error("保存位置失败:", e);
-          }
+        try {
+          // 从 Rust 获取逻辑坐标（已处理 DPI 缩放）
+          const [x, y] = await invoke<[number, number]>("get_window_position", { id: noteId });
+          await invoke("update_note_position", { id: noteId, x, y });
+        } catch (e) {
+          console.error("保存位置失败:", e);
         }
       }, 300);
     });
@@ -116,7 +120,6 @@ function Note({ noteId }: NoteProps) {
   // 监听窗口大小变化
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    let lastSize = { width: 0, height: 0 };
     let sizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unlistenResize = appWindow.onResized(({ payload }) => {
@@ -124,13 +127,10 @@ function Note({ noteId }: NoteProps) {
       // 防抖保存大小
       if (sizeTimeout) clearTimeout(sizeTimeout);
       sizeTimeout = setTimeout(async () => {
-        if (width !== lastSize.width || height !== lastSize.height) {
-          lastSize = { width, height };
-          try {
-            await invoke("update_note_size", { id: noteId, width, height });
-          } catch (e) {
-            console.error("保存大小失败:", e);
-          }
+        try {
+          await invoke("update_note_size", { id: noteId, width, height });
+        } catch (e) {
+          console.error("保存大小失败:", e);
         }
       }, 300);
     });
@@ -142,26 +142,23 @@ function Note({ noteId }: NoteProps) {
   }, [noteId]);
 
   // 处理粘贴事件 - 支持图片粘贴
-  const handlePaste = useCallback(
-    (e: React.ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
 
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
 
-        if (item.type.startsWith("image/")) {
-          e.preventDefault();
-          const file = item.getAsFile();
-          if (file) {
-            insertImage(file);
-          }
-          return;
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          insertImage(file);
         }
+        return;
       }
-    },
-    []
-  );
+    }
+  }, []);
 
   // 插入图片到编辑器
   const insertImage = (file: File) => {
@@ -215,21 +212,29 @@ function Note({ noteId }: NoteProps) {
     e.target.value = "";
   };
 
-  // 窗口操作 - 关闭时删除便签
-  const handleClose = async () => {
+  // 隐藏便签（保留数据）
+  const handleHide = async () => {
     try {
-      await invoke("delete_note", { id: noteId });
+      await invoke("hide_note", { id: noteId });
     } catch (e) {
-      console.error("删除便签失败:", e);
-      // 备用方案：直接关闭窗口
-      const window = getCurrentWindow();
-      await window.close();
+      console.error("隐藏便签失败:", e);
+    }
+  };
+
+  // 删除便签（永久删除，右键或长按）
+  const handleDelete = async () => {
+    if (confirm("确定要永久删除这个便签吗？")) {
+      try {
+        await invoke("delete_note", { id: noteId });
+      } catch (e) {
+        console.error("删除便签失败:", e);
+      }
     }
   };
 
   const handleMinimize = async () => {
-    const window = getCurrentWindow();
-    await window.minimize();
+    const appWindow = getCurrentWindow();
+    await appWindow.minimize();
   };
 
   // 切换颜色
@@ -272,7 +277,7 @@ function Note({ noteId }: NoteProps) {
             🎨
           </button>
 
-          {/* 最小化 */}
+          {/* 最小化到任务栏 */}
           <button
             className="toolbar-btn minimize-btn"
             onClick={handleMinimize}
@@ -281,11 +286,15 @@ function Note({ noteId }: NoteProps) {
             −
           </button>
 
-          {/* 关闭 */}
+          {/* 隐藏便签（保留数据） */}
           <button
-            className="toolbar-btn close-btn"
-            onClick={handleClose}
-            title="关闭"
+            className="toolbar-btn hide-btn"
+            onClick={handleHide}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              handleDelete();
+            }}
+            title="隐藏 (右键删除)"
           >
             ×
           </button>

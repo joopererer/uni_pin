@@ -95,12 +95,18 @@ body,
   font-weight: bold;
 }
 
-.toolbar-btn.close-btn {
+.toolbar-btn.hide-btn {
   font-size: 14px;
   font-weight: bold;
 }
 
-.toolbar-btn.close-btn:hover {
+.toolbar-btn.hide-btn:hover {
+  background: #78909c;
+  color: white;
+}
+
+/* 右键删除提示 */
+.toolbar-btn.hide-btn:active {
   background: #ef5350;
   color: white;
 }

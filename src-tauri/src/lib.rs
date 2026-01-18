@@ -5,7 +5,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, LogicalPosition,
 };
 use image::GenericImageView;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -27,7 +27,7 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
         None => (generate_window_label(), None, (280.0, 320.0)),
     };
 
-    // 创建窗口构建器
+    // 创建窗口构建器 - 初始不可见，等前端加载完成后再显示
     let mut builder = WebviewWindowBuilder::new(
         app,
         &window_label,
@@ -41,10 +41,10 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
     .always_on_top(true)
     .skip_taskbar(true)
     .resizable(true)
-    .visible(true)
+    .visible(false)  // 初始不可见
     .focused(true);
 
-    // 设置位置（如果有保存的位置）
+    // 设置位置（使用逻辑坐标）
     if let Some((x, y)) = position {
         builder = builder.position(x, y);
     } else {
@@ -74,6 +74,16 @@ fn create_note_window(app: AppHandle) -> Result<String, String> {
     create_note_window_internal(&app, None)
 }
 
+/// Tauri 命令：显示窗口（前端加载完成后调用）
+#[tauri::command]
+fn show_note_window(app: AppHandle, id: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(&id) {
+        window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
+        window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+    }
+    Ok(())
+}
+
 /// Tauri 命令：保存便签数据
 #[tauri::command]
 fn save_note(
@@ -89,7 +99,6 @@ fn save_note(
         note.theme_index = theme_index;
         save_notes(&store)?;
     } else {
-        // 如果不存在，创建新的
         let mut note = NoteData::new(id.clone());
         note.content = content;
         note.theme_index = theme_index;
@@ -100,7 +109,7 @@ fn save_note(
     Ok(())
 }
 
-/// Tauri 命令：更新便签窗口位置
+/// Tauri 命令：更新便签窗口位置（接收逻辑坐标）
 #[tauri::command]
 fn update_note_position(
     state: State<'_, NoteStoreState>,
@@ -143,7 +152,17 @@ fn get_note(state: State<'_, NoteStoreState>, id: String) -> Option<NoteData> {
     store.notes.get(&id).cloned()
 }
 
-/// Tauri 命令：删除便签（标记为已关闭）
+/// Tauri 命令：隐藏便签窗口（不删除数据）
+#[tauri::command]
+fn hide_note(app: AppHandle, id: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(&id) {
+        window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))?;
+    }
+    println!("🔽 隐藏便签: {}", id);
+    Ok(())
+}
+
+/// Tauri 命令：删除便签（永久删除）
 #[tauri::command]
 fn delete_note(
     app: AppHandle,
@@ -162,6 +181,27 @@ fn delete_note(
     
     println!("🗑️ 删除便签: {}", id);
     Ok(())
+}
+
+/// Tauri 命令：获取窗口的逻辑坐标位置
+#[tauri::command]
+fn get_window_position(app: AppHandle, id: String) -> Result<(f64, f64), String> {
+    if let Some(window) = app.get_webview_window(&id) {
+        // 获取物理位置
+        let physical_pos = window.outer_position()
+            .map_err(|e| format!("获取位置失败: {}", e))?;
+        
+        // 获取缩放因子
+        let scale_factor = window.scale_factor()
+            .map_err(|e| format!("获取缩放因子失败: {}", e))?;
+        
+        // 转换为逻辑坐标
+        let logical_pos: LogicalPosition<f64> = physical_pos.to_logical(scale_factor);
+        
+        Ok((logical_pos.x, logical_pos.y))
+    } else {
+        Err("窗口不存在".to_string())
+    }
 }
 
 /// Tauri 命令：获取所有便签窗口的标签
@@ -300,11 +340,14 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             create_note_window,
+            show_note_window,
             save_note,
             update_note_position,
             update_note_size,
             get_note,
+            hide_note,
             delete_note,
+            get_window_position,
             get_all_note_windows
         ])
         .setup(|app| {
