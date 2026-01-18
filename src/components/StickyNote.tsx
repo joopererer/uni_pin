@@ -12,8 +12,9 @@ function StickyNote({ noteId, onClose, onMinimize }: StickyNoteProps) {
 
   // 实现窗口拖拽
   const handleMouseDown = async (e: React.MouseEvent) => {
-    // 只在标题栏区域允许拖拽
-    if ((e.target as HTMLElement).closest(".title-bar")) {
+    // 只在标题栏区域允许拖拽，但排除按钮区域
+    const target = e.target as HTMLElement;
+    if (target.closest(".title-bar") && !target.closest(".window-controls")) {
       const window = getCurrentWindow();
       await window.startDragging();
     }

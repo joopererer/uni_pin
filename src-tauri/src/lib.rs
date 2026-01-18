@@ -5,7 +5,7 @@ use tauri::{
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
 use image::GenericImageView;
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use uuid::Uuid;
 
 /// 使用 UUID 生成唯一的窗口标签
@@ -74,8 +74,11 @@ fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Err
     // 注册全局快捷键
     app.global_shortcut().on_shortcut(shortcut_alt_n, {
         let app_handle = app.clone();
-        move |_app, shortcut, _event| {
-            if shortcut == &Shortcut::new(Some(Modifiers::ALT), Code::KeyN) {
+        move |_app, shortcut, event| {
+            // 只在按键按下时触发，忽略释放事件（避免创建两个窗口）
+            if event.state == ShortcutState::Pressed 
+                && shortcut == &Shortcut::new(Some(Modifiers::ALT), Code::KeyN) 
+            {
                 println!("⌨️  快捷键 Alt+N 触发");
                 match create_note_window_internal(&app_handle) {
                     Ok(label) => println!("✅ 通过快捷键创建便签: {}", label),
