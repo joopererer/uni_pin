@@ -1,17 +1,19 @@
-use std::sync::atomic::{AtomicU32, Ordering};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+use uuid::Uuid;
 
-// 用于生成唯一的便签窗口 ID
-static NOTE_COUNTER: AtomicU32 = AtomicU32::new(1);
+/// 使用 UUID 生成唯一的窗口标签
+fn generate_window_label() -> String {
+    format!("note-{}", Uuid::new_v4().to_string())
+}
 
 /// 创建一个新的便签窗口
 fn create_note_window_internal(app: &AppHandle) -> Result<String, String> {
-    let note_id = NOTE_COUNTER.fetch_add(1, Ordering::SeqCst);
-    let window_label = format!("note-{}", note_id);
+    let window_label = generate_window_label();
 
     // 创建无边框、透明的便签窗口
     let _window = WebviewWindowBuilder::new(
@@ -19,7 +21,7 @@ fn create_note_window_internal(app: &AppHandle) -> Result<String, String> {
         &window_label,
         WebviewUrl::App("index.html".into()),
     )
-    .title(format!("便签 #{}", note_id))
+    .title("便签")
     .inner_size(280.0, 320.0)           // 默认窗口大小
     .min_inner_size(200.0, 150.0)       // 最小窗口大小
     .decorations(false)                  // 无边框
@@ -33,6 +35,7 @@ fn create_note_window_internal(app: &AppHandle) -> Result<String, String> {
     .build()
     .map_err(|e| format!("创建窗口失败: {}", e))?;
 
+    println!("📝 创建新便签: {}", window_label);
     Ok(window_label)
 }
 
@@ -61,10 +64,33 @@ fn get_all_note_windows(app: AppHandle) -> Vec<String> {
         .collect()
 }
 
+/// 设置全局快捷键
+fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    // 定义 Alt+N 快捷键
+    let shortcut_alt_n = Shortcut::new(Some(Modifiers::ALT), Code::KeyN);
+
+    // 注册全局快捷键
+    app.global_shortcut().on_shortcut(shortcut_alt_n, {
+        let app_handle = app.clone();
+        move |_app, shortcut, _event| {
+            if shortcut == &Shortcut::new(Some(Modifiers::ALT), Code::KeyN) {
+                println!("⌨️  快捷键 Alt+N 触发");
+                match create_note_window_internal(&app_handle) {
+                    Ok(label) => println!("✅ 通过快捷键创建便签: {}", label),
+                    Err(e) => eprintln!("❌ 创建便签失败: {}", e),
+                }
+            }
+        }
+    })?;
+
+    println!("⌨️  已注册全局快捷键: Alt+N (创建新便签)");
+    Ok(())
+}
+
 /// 设置系统托盘
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // 创建托盘菜单
-    let new_note = MenuItem::with_id(app, "new_note", "📝 新建便签", true, None::<&str>)?;
+    let new_note = MenuItem::with_id(app, "new_note", "📝 新建便签 (Alt+N)", true, None::<&str>)?;
     let show_all = MenuItem::with_id(app, "show_all", "📋 显示全部", true, None::<&str>)?;
     let hide_all = MenuItem::with_id(app, "hide_all", "🔽 隐藏全部", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
@@ -74,7 +100,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     // 构建托盘图标 - 使用默认图标
     let _tray = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("便签应用 - 左键创建便签，右键打开菜单")
+        .tooltip("便签应用 - Alt+N 创建新便签")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id.as_ref());
@@ -131,6 +157,7 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             create_note_window,
             close_note_window,
@@ -139,9 +166,13 @@ pub fn run() {
         .setup(|app| {
             // 设置系统托盘
             setup_tray(app.handle())?;
+
+            // 设置全局快捷键
+            setup_global_shortcuts(app.handle())?;
             
             println!("✨ 便签应用已启动！");
             println!("📌 点击系统托盘图标创建新便签");
+            println!("⌨️  按 Alt+N 快速创建新便签");
             println!("📋 右键托盘图标查看菜单");
             
             Ok(())
