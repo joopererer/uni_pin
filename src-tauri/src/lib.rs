@@ -5,7 +5,7 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, LogicalPosition,
+    AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, LogicalPosition, LogicalSize,
 };
 use image::GenericImageView;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
@@ -187,18 +187,27 @@ fn delete_note(
 #[tauri::command]
 fn get_window_position(app: AppHandle, id: String) -> Result<(f64, f64), String> {
     if let Some(window) = app.get_webview_window(&id) {
-        // 获取物理位置
         let physical_pos = window.outer_position()
             .map_err(|e| format!("获取位置失败: {}", e))?;
-        
-        // 获取缩放因子
         let scale_factor = window.scale_factor()
             .map_err(|e| format!("获取缩放因子失败: {}", e))?;
-        
-        // 转换为逻辑坐标
         let logical_pos: LogicalPosition<f64> = physical_pos.to_logical(scale_factor);
-        
         Ok((logical_pos.x, logical_pos.y))
+    } else {
+        Err("窗口不存在".to_string())
+    }
+}
+
+/// Tauri 命令：获取窗口的逻辑尺寸
+#[tauri::command]
+fn get_window_size(app: AppHandle, id: String) -> Result<(f64, f64), String> {
+    if let Some(window) = app.get_webview_window(&id) {
+        let physical_size = window.inner_size()
+            .map_err(|e| format!("获取尺寸失败: {}", e))?;
+        let scale_factor = window.scale_factor()
+            .map_err(|e| format!("获取缩放因子失败: {}", e))?;
+        let logical_size: LogicalSize<f64> = physical_size.to_logical(scale_factor);
+        Ok((logical_size.width, logical_size.height))
     } else {
         Err("窗口不存在".to_string())
     }
@@ -348,6 +357,7 @@ pub fn run() {
             hide_note,
             delete_note,
             get_window_position,
+            get_window_size,
             get_all_note_windows
         ])
         .setup(|app| {

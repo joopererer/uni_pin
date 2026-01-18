@@ -51,7 +51,6 @@ function Note({ noteId }: NoteProps) {
       } catch (e) {
         console.error("加载便签数据失败:", e);
         setIsLoaded(true);
-        // 即使加载失败也显示窗口
         try {
           await invoke("show_note_window", { id: noteId });
         } catch {}
@@ -98,7 +97,6 @@ function Note({ noteId }: NoteProps) {
     let positionTimeout: ReturnType<typeof setTimeout> | null = null;
 
     const unlistenMove = appWindow.onMoved(async () => {
-      // 防抖保存位置
       if (positionTimeout) clearTimeout(positionTimeout);
       positionTimeout = setTimeout(async () => {
         try {
@@ -117,17 +115,17 @@ function Note({ noteId }: NoteProps) {
     };
   }, [noteId]);
 
-  // 监听窗口大小变化
+  // 监听窗口大小变化 - 使用逻辑尺寸
   useEffect(() => {
     const appWindow = getCurrentWindow();
     let sizeTimeout: ReturnType<typeof setTimeout> | null = null;
 
-    const unlistenResize = appWindow.onResized(({ payload }) => {
-      const { width, height } = payload;
-      // 防抖保存大小
+    const unlistenResize = appWindow.onResized(async () => {
       if (sizeTimeout) clearTimeout(sizeTimeout);
       sizeTimeout = setTimeout(async () => {
         try {
+          // 从 Rust 获取逻辑尺寸（已处理 DPI 缩放）
+          const [width, height] = await invoke<[number, number]>("get_window_size", { id: noteId });
           await invoke("update_note_size", { id: noteId, width, height });
         } catch (e) {
           console.error("保存大小失败:", e);
@@ -221,20 +219,15 @@ function Note({ noteId }: NoteProps) {
     }
   };
 
-  // 删除便签（永久删除，右键或长按）
+  // 删除便签（永久删除）
   const handleDelete = async () => {
-    if (confirm("确定要永久删除这个便签吗？")) {
+    if (confirm("确定要永久删除这个便签吗？\n\n删除后无法恢复！")) {
       try {
         await invoke("delete_note", { id: noteId });
       } catch (e) {
         console.error("删除便签失败:", e);
       }
     }
-  };
-
-  const handleMinimize = async () => {
-    const appWindow = getCurrentWindow();
-    await appWindow.minimize();
   };
 
   // 切换颜色
@@ -277,26 +270,22 @@ function Note({ noteId }: NoteProps) {
             🎨
           </button>
 
-          {/* 最小化到任务栏 */}
-          <button
-            className="toolbar-btn minimize-btn"
-            onClick={handleMinimize}
-            title="最小化"
-          >
-            −
-          </button>
-
           {/* 隐藏便签（保留数据） */}
           <button
             className="toolbar-btn hide-btn"
             onClick={handleHide}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              handleDelete();
-            }}
-            title="隐藏 (右键删除)"
+            title="隐藏便签"
           >
-            ×
+            −
+          </button>
+
+          {/* 删除便签（永久删除） */}
+          <button
+            className="toolbar-btn delete-btn"
+            onClick={handleDelete}
+            title="删除便签"
+          >
+            🗑️
           </button>
         </div>
       </div>

@@ -90,13 +90,8 @@ body,
   transform: scale(1.1);
 }
 
-.toolbar-btn.minimize-btn {
-  font-size: 16px;
-  font-weight: bold;
-}
-
 .toolbar-btn.hide-btn {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: bold;
 }
 
@@ -105,8 +100,11 @@ body,
   color: white;
 }
 
-/* 右键删除提示 */
-.toolbar-btn.hide-btn:active {
+.toolbar-btn.delete-btn {
+  font-size: 11px;
+}
+
+.toolbar-btn.delete-btn:hover {
   background: #ef5350;
   color: white;
 }
