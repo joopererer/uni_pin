@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
+import ConfirmDialog from "./ConfirmDialog";
 
 // 预定义的便签颜色主题
 const NOTE_THEMES = [
@@ -35,6 +36,7 @@ function Note({ noteId }: NoteProps) {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showOpacitySlider, setShowOpacitySlider] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // 工具栏自动隐藏相关状态
   const [showToolbar, setShowToolbar] = useState(true);
@@ -299,14 +301,17 @@ function Note({ noteId }: NoteProps) {
     }
   };
 
-  const handleDelete = async () => {
-    if (confirm("确定要永久删除这个便签吗？\n\n删除后无法恢复！")) {
-      try {
-        await invoke("delete_note", { id: noteId });
-      } catch (e) {
-        console.error("删除便签失败:", e);
-      }
+  const handleDelete = () => {
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    try {
+      await invoke("delete_note", { id: noteId });
+    } catch (e) {
+      console.error("删除便签失败:", e);
     }
+    setShowDeleteConfirm(false);
   };
 
   const cycleTheme = () => {
@@ -337,121 +342,135 @@ function Note({ noteId }: NoteProps) {
   const bgOpacity = (100 - opacity) / 100;
 
   return (
-    <div
-      ref={containerRef}
-      className={`note-container ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
-      onContextMenu={handleContextMenu}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      style={{
-        "--note-bg": theme.bg,
-        "--note-header": theme.header,
-        "--note-text": theme.text,
-        "--note-opacity": bgOpacity,
-      } as React.CSSProperties}
-    >
-      {/* 顶部拖拽把手 - 使用绝对定位，隐藏时不占空间 */}
-      <div className={`note-header ${showToolbar ? 'visible' : ''}`} data-tauri-drag-region>
-        <div className="drag-indicator" data-tauri-drag-region>
-          <span data-tauri-drag-region></span>
-          <span data-tauri-drag-region></span>
-          <span data-tauri-drag-region></span>
-        </div>
-
-        {alwaysOnTop && <span className="pin-indicator" title="已置顶">📍</span>}
-
-        {/* 工具栏 */}
-        <div className="note-toolbar">
-          <button
-            className="toolbar-btn"
-            onClick={() => fileInputRef.current?.click()}
-            title="添加图片"
-          >
-            🖼️
-          </button>
-
-          <button className="toolbar-btn" onClick={cycleTheme} title="切换颜色">
-            🎨
-          </button>
-
-          {/* 透明度调节 - 简单下拉样式 */}
-          <div className="opacity-control">
-            <button
-              className="toolbar-btn"
-              onClick={() => setShowOpacitySlider(!showOpacitySlider)}
-              title={`透明度: ${opacity}%`}
-            >
-              💧
-            </button>
-            {showOpacitySlider && (
-              <div className="opacity-slider-popup">
-                <input
-                  type="range"
-                  min="0"
-                  max="90"
-                  value={opacity}
-                  onChange={(e) => handleOpacityChange(Number(e.target.value))}
-                  className="opacity-slider"
-                />
-                <span className="opacity-value">{opacity}%</span>
-              </div>
-            )}
+    <>
+      <div
+        ref={containerRef}
+        className={`note-container ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
+        onContextMenu={handleContextMenu}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        style={{
+          "--note-bg": theme.bg,
+          "--note-header": theme.header,
+          "--note-text": theme.text,
+          "--note-opacity": bgOpacity,
+        } as React.CSSProperties}
+      >
+        {/* 顶部拖拽把手 */}
+        <div className={`note-header ${showToolbar ? 'visible' : ''}`} data-tauri-drag-region>
+          <div className="drag-indicator" data-tauri-drag-region>
+            <span data-tauri-drag-region></span>
+            <span data-tauri-drag-region></span>
+            <span data-tauri-drag-region></span>
           </div>
 
-          <button className="toolbar-btn hide-btn" onClick={handleHide} title="隐藏便签">
-            −
-          </button>
+          {alwaysOnTop && <span className="pin-indicator" title="已置顶">📍</span>}
 
-          <button className="toolbar-btn delete-btn" onClick={handleDelete} title="删除便签">
-            🗑️
-          </button>
+          {/* 工具栏 */}
+          <div className="note-toolbar">
+            <button
+              className="toolbar-btn"
+              onClick={() => fileInputRef.current?.click()}
+              title="添加图片"
+            >
+              🖼️
+            </button>
+
+            <button className="toolbar-btn" onClick={cycleTheme} title="切换颜色">
+              🎨
+            </button>
+
+            {/* 透明度调节 */}
+            <div className="opacity-control">
+              <button
+                className="toolbar-btn"
+                onClick={() => setShowOpacitySlider(!showOpacitySlider)}
+                title={`透明度: ${opacity}%`}
+              >
+                💧
+              </button>
+              {showOpacitySlider && (
+                <div className="opacity-slider-popup">
+                  <input
+                    type="range"
+                    min="0"
+                    max="90"
+                    value={opacity}
+                    onChange={(e) => handleOpacityChange(Number(e.target.value))}
+                    className="opacity-slider"
+                  />
+                  <span className="opacity-value">{opacity}%</span>
+                </div>
+              )}
+            </div>
+
+            <button className="toolbar-btn hide-btn" onClick={handleHide} title="隐藏便签">
+              −
+            </button>
+
+            <button className="toolbar-btn delete-btn" onClick={handleDelete} title="删除便签">
+              🗑️
+            </button>
+          </div>
         </div>
+
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={handleFileSelect}
+        />
+
+        <div
+          ref={contentRef}
+          className="note-content"
+          contentEditable
+          onPaste={handlePaste}
+          onInput={handleContentChange}
+          onFocus={handleContentFocus}
+          onBlur={handleContentBlur}
+          data-placeholder="输入便签内容... 支持 Ctrl+V 粘贴图片"
+          suppressContentEditableWarning
+        />
+
+        <div className="resize-indicator" />
+
+        {/* 右键菜单 */}
+        {showContextMenu && (
+          <div
+            className="context-menu"
+            style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
+          >
+            <button onClick={handleToggleAlwaysOnTop}>
+              {alwaysOnTop ? "📌 取消置顶" : "📍 置顶窗口"}
+            </button>
+            <button onClick={() => { setShowOpacitySlider(true); setShowContextMenu(false); setShowToolbar(true); }}>
+              💧 调节透明度
+            </button>
+            <div className="menu-divider" />
+            <button onClick={handleHide}>
+              🔽 隐藏便签
+            </button>
+            <button className="danger" onClick={handleDelete}>
+              🗑️ 删除便签
+            </button>
+          </div>
+        )}
       </div>
 
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        style={{ display: "none" }}
-        onChange={handleFileSelect}
+      {/* 删除确认对话框 */}
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="删除便签"
+        message="确定要永久删除这个便签吗？\n\n删除后无法恢复！"
+        onConfirm={confirmDelete}
+        onCancel={() => setShowDeleteConfirm(false)}
+        confirmText="删除"
+        cancelText="取消"
+        danger={true}
       />
-
-      <div
-        ref={contentRef}
-        className="note-content"
-        contentEditable
-        onPaste={handlePaste}
-        onInput={handleContentChange}
-        onFocus={handleContentFocus}
-        onBlur={handleContentBlur}
-        data-placeholder="输入便签内容... 支持 Ctrl+V 粘贴图片"
-        suppressContentEditableWarning
-      />
-
-      <div className="resize-indicator" />
-
-      {/* 右键菜单 */}
-      {showContextMenu && (
-        <div
-          className="context-menu"
-          style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
-        >
-          <button onClick={handleToggleAlwaysOnTop}>
-            {alwaysOnTop ? "📌 取消置顶" : "📍 置顶窗口"}
-          </button>
-          <button onClick={() => { setShowOpacitySlider(true); setShowContextMenu(false); setShowToolbar(true); }}>
-            💧 调节透明度
-          </button>
-          <div className="menu-divider" />
-          <button onClick={handleHide}>
-            🔽 隐藏便签
-          </button>
-          <button className="danger" onClick={handleDelete}>
-            🗑️ 删除便签
-          </button>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 

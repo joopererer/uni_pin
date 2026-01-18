@@ -1,103 +1,146 @@
-# 便签应用 (Sticky Notes)
+# UniStick 📝
 
 基于 Tauri v2 + React 的 Windows 桌面便签应用。
 
-## 特性
+## ✨ 特性
 
+### 核心功能
 - 🎯 **系统托盘驻留** - 应用启动后驻留在系统托盘，不占用任务栏
 - ⌨️ **全局快捷键** - 按 `Alt+N` 快速创建新便签（任何应用下都可用）
 - 📝 **无边框便签** - 创建美观的无边框、透明背景便签窗口
-- 🔝 **始终置顶** - 便签窗口始终显示在最前面
+- 📍 **窗口置顶** - 支持便签窗口置顶（默认不置顶）
 - 🖱️ **拖拽移动** - 通过标题栏拖拽移动便签位置
-- 💾 **自动保存** - 便签内容自动保存到本地存储
-- 🆔 **UUID 标识** - 每个便签使用 UUID 作为唯一标识
+- 🔍 **内容搜索** - 在管理中心搜索便签内容
 
-## 开发环境要求
+### 便签功能
+- 📝 **富文本编辑** - 支持文本编辑和格式化
+- 🖼️ **图片支持** - 支持 Ctrl+V 粘贴图片或选择本地图片
+- 🎨 **6种颜色主题** - 黄色、粉色、蓝色、绿色、橙色、紫色
+- 💧 **透明度调节** - 0-90% 透明度可调
+- 📦 **数据持久化** - 自动保存内容、位置、大小、主题、透明度
+- 🔄 **自动恢复** - 启动时自动恢复未关闭的便签
+
+### 管理功能
+- 📋 **管理中心** - 集中管理所有便签
+- ☑️ **批量操作** - 支持多选、全选、批量显示/隐藏/删除
+- 🔍 **智能搜索** - 快速查找包含特定内容的便签
+- ⚙️ **开机自启** - 支持设置开机自动启动
+
+## 🛠️ 开发环境要求
 
 - Node.js 18+
 - Rust 1.70+
 - Windows 10/11
 
-## 安装依赖
+## 📦 安装依赖
 
 ```bash
 npm install
 ```
 
-## 开发运行
+## 🚀 开发运行
 
 ```bash
 npm run tauri dev
 ```
 
-## 构建发布
+## 📦 构建发布
 
 ```bash
 npm run tauri build
 ```
 
-## 使用说明
+构建产物位于 `src-tauri/target/release/bundle/`
 
-1. 启动应用后，程序会驻留在系统托盘（右下角）
-2. **按 Alt+N** - 全局快捷键，随时创建新便签
-3. **左键单击托盘图标** - 创建新便签
-4. **右键单击托盘图标** - 打开菜单
-   - 📝 新建便签 (Alt+N)
-   - 📋 显示全部
-   - 🔽 隐藏全部
-   - ❌ 退出
+## 📖 使用说明
 
-## 项目结构
+### 基本操作
+
+1. **启动应用** - 程序会驻留在系统托盘（右下角），点击托盘图标打开管理中心
+2. **创建便签** - 
+   - 按 `Alt+N` 快捷键（全局，任何应用下都可用）
+   - 点击托盘图标
+   - 在管理中心点击"新建便签"按钮
+3. **编辑便签** - 
+   - 直接点击便签内容区域即可编辑
+   - 支持 Ctrl+V 粘贴图片
+   - 点击工具栏 🖼️ 按钮选择本地图片
+4. **管理便签** - 
+   - 点击托盘图标打开管理中心
+   - 搜索、批量操作、查看状态
+
+### 快捷键
+
+- `Alt+N` - 快速创建新便签
+- `ESC` - 关闭确认对话框
+- `双击便签` - 进入编辑模式
+
+### 工具栏按钮
+
+- 🖼️ - 添加图片
+- 🎨 - 切换颜色主题
+- 💧 - 调节透明度（0-90%）
+- − - 隐藏便签（保留数据）
+- 🗑️ - 删除便签（永久删除）
+
+### 右键菜单
+
+右键点击便签可访问：
+- 📌 置顶/取消置顶
+- 💧 调节透明度
+- 🔽 隐藏便签
+- 🗑️ 删除便签
+
+## 📁 项目结构
 
 ```
-photo_stick/
-├── src/                    # React 前端代码
+uni-stick/
+├── src/                      # React 前端代码
 │   ├── components/
-│   │   └── StickyNote.tsx  # 便签组件
+│   │   ├── Note.tsx          # 便签组件
+│   │   ├── Manager.tsx       # 管理中心组件
+│   │   ├── ConfirmDialog.tsx # 确认对话框
+│   │   └── AboutDialog.tsx   # 关于对话框
 │   ├── App.tsx
 │   ├── main.tsx
+│   ├── manager.tsx           # 管理中心入口
 │   └── styles.css
-├── src-tauri/              # Tauri/Rust 后端代码
+├── src-tauri/                # Tauri/Rust 后端代码
 │   ├── src/
-│   │   ├── lib.rs          # 核心逻辑：托盘、窗口管理
-│   │   └── main.rs         # 入口文件
-│   ├── icons/              # 应用图标
-│   ├── capabilities/       # 权限配置
+│   │   ├── lib.rs            # 核心逻辑
+│   │   ├── main.rs           # 入口文件
+│   │   └── note_store.rs     # 数据存储
+│   ├── icons/                # 应用图标
+│   ├── capabilities/         # 权限配置
 │   ├── Cargo.toml
 │   └── tauri.conf.json
 ├── package.json
-└── vite.config.ts
+├── vite.config.ts
+└── README.md
 ```
 
-## 核心 API
+## 🔧 技术栈
 
-### Rust 命令
+- **前端**: React + TypeScript + Vite
+- **后端**: Rust + Tauri v2
+- **存储**: JSON 文件（本地 AppData 目录）
+- **图片处理**: image 库（自动压缩、格式转换）
 
-```rust
-// 创建新便签窗口
-#[tauri::command]
-fn create_note_window(app: AppHandle) -> Result<String, String>
+## 📝 数据存储
 
-// 关闭便签窗口
-#[tauri::command]
-fn close_note_window(app: AppHandle, label: String) -> Result<(), String>
+应用数据存储在：
+- Windows: `%LOCALAPPDATA%\sticky-notes\`
+  - `notes.json` - 便签数据
+  - `images/` - 图片文件（自动压缩保存）
 
-// 获取所有便签窗口
-#[tauri::command]
-fn get_all_note_windows(app: AppHandle) -> Vec<String>
-```
+## 🤝 贡献
 
-### 前端调用
+欢迎提交 Issue 和 Pull Request！
 
-```typescript
-import { invoke } from "@tauri-apps/api/core";
+## 📄 许可证
 
-// 创建新便签
-const label = await invoke("create_note_window");
+MIT License
 
-// 关闭便签
-await invoke("close_note_window", { label: "note-1" });
+---
 
-// 获取所有便签
-const notes = await invoke("get_all_note_windows");
-```
+**UniStick** - 简洁、高效的桌面便签应用

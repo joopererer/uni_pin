@@ -1,12 +1,12 @@
 [package]
-name = "sticky-notes"
+name = "uni-stick"
 version = "0.1.0"
-description = "A Tauri-based sticky notes application"
+description = "UniStick - A Tauri-based sticky notes application"
 authors = ["you"]
 edition = "2021"
 
 [lib]
-name = "sticky_notes_lib"
+name = "uni_stick_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

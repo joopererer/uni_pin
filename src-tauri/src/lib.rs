@@ -83,7 +83,7 @@ fn create_manager_window(app: &AppHandle) -> Result<(), String> {
         "manager",
         WebviewUrl::App("manager.html".into()),
     )
-    .title("便签管理中心")
+    .title("UniStick 管理中心")
     .inner_size(600.0, 500.0)
     .min_inner_size(400.0, 300.0)
     .decorations(true)
@@ -465,9 +465,10 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let manager = MenuItem::with_id(app, "manager", "📋 管理中心", true, None::<&str>)?;
     let show_all = MenuItem::with_id(app, "show_all", "👁️ 显示全部", true, None::<&str>)?;
     let hide_all = MenuItem::with_id(app, "hide_all", "🔽 隐藏全部", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "ℹ️ 关于", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &quit])?;
+    let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &about, &quit])?;
 
     let png_bytes = include_bytes!("../icons/32x32.png");
     let img = image::load_from_memory(png_bytes).expect("Failed to load icon");
@@ -478,7 +479,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let _tray = TrayIconBuilder::new()
         .icon(icon)
         .menu(&menu)
-        .tooltip("便签应用 - 点击打开管理中心")
+        .tooltip("UniStick - 点击打开管理中心")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id.as_ref());
@@ -537,6 +538,19 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
                 let _ = save_notes(&store);
             }
         }
+        "about" => {
+            let _ = create_manager_window(app);
+            // 等待窗口加载后发送消息
+            std::thread::spawn({
+                let app = app.clone();
+                move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    if let Some(window) = app.get_webview_window("manager") {
+                        let _ = window.eval("if (window.showAboutDialog) window.showAboutDialog(); else window.dispatchEvent(new CustomEvent('showAbout'));");
+                    }
+                }
+            });
+        }
         "quit" => {
             app.exit(0);
         }
@@ -575,7 +589,7 @@ pub fn run() {
             setup_tray(app.handle())?;
             setup_global_shortcuts(app.handle())?;
             
-            println!("✨ 便签应用已启动！");
+            println!("✨ UniStick 已启动！");
             Ok(())
         })
         .run(tauri::generate_context!())
