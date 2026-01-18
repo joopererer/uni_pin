@@ -40,16 +40,17 @@ export interface Translations {
     settings: string;
   };
   // 便签
-  note: {
-    placeholder: string;
-    addImage: string;
-    changeColor: string;
-    opacity: string;
-    hide: string;
-    delete: string;
-    alwaysOnTop: string;
-    cancelAlwaysOnTop: string;
-    imageSaveFailed: string;
+    note: {
+      placeholder: string;
+      addImage: string;
+      changeColor: string;
+      opacity: string;
+      hide: string;
+      delete: string;
+      alwaysOnTop: string;
+      cancelAlwaysOnTop: string;
+      imageSaveFailed: string;
+      imagePasteFailed: string;
     contextMenu: {
       pin: string;
       unpin: string;
@@ -148,6 +149,7 @@ const translations: Record<Language, Translations> = {
       alwaysOnTop: '置顶窗口',
       cancelAlwaysOnTop: '取消置顶',
       imageSaveFailed: '保存图片失败，请重试',
+      imagePasteFailed: '无法识别剪贴板中的图片。\n\n可能的原因：\n1. 剪贴板中确实没有图片\n2. 图片格式不受支持（支持的格式：PNG、JPEG、GIF、WebP）\n3. 如果是网页图片，请尝试右键另存为后再粘贴',
       contextMenu: {
         pin: '置顶窗口',
         unpin: '取消置顶',
@@ -240,6 +242,7 @@ const translations: Record<Language, Translations> = {
       alwaysOnTop: 'Always on Top',
       cancelAlwaysOnTop: 'Cancel Always on Top',
       imageSaveFailed: 'Failed to save image, please try again',
+      imagePasteFailed: 'Cannot identify image in clipboard.\n\nPossible reasons:\n1. Clipboard does not contain an image\n2. Image format is not supported (supported formats: PNG, JPEG, GIF, WebP)\n3. For web images, try right-clicking and saving first before pasting',
       contextMenu: {
         pin: 'Pin Window',
         unpin: 'Cancel Pin',

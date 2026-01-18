@@ -9,7 +9,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder, LogicalPosition, LogicalSize,
 };
-use image::{GenericImageView, ImageEncoder};
+use image::GenericImageView;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use uuid::Uuid;
@@ -335,33 +335,47 @@ fn get_clipboard_image() -> Result<Option<String>, String> {
         use windows::Win32::System::Memory::*;
         use windows::Win32::Foundation::HGLOBAL;
         
+        println!("[后端] === get_clipboard_image 开始 ===");
+        
         unsafe {
             // 打开剪贴板
-            if OpenClipboard(None).is_err() {
-                return Ok(None);
+            match OpenClipboard(None) {
+                Ok(_) => {
+                    println!("[后端] ✓ 剪贴板已打开");
+                }
+                Err(e) => {
+                    println!("[后端] ✗ 打开剪贴板失败: {:?}", e);
+                    return Ok(None);
+                }
             }
             
             let result = {
                 // 检查是否有 DIB 格式（Windows 位图）
                 // CF_DIB = 8
+                println!("[后端] 检查剪贴板中是否有 DIB 格式 (CF_DIB=8)...");
                 let h_dib_result = GetClipboardData(8u32);
                 if h_dib_result.is_err() {
+                    println!("[后端] ✗ 剪贴板中没有 DIB 格式的数据");
                     let _ = CloseClipboard();
                     return Ok(None);
                 }
                 
+                println!("[后端] ✓ 找到 DIB 格式数据");
                 let h_dib_handle = h_dib_result.unwrap();
                 // 将 HANDLE 转换为 HGLOBAL（HANDLE 是 isize，HGLOBAL 是 *mut c_void）
                 let h_dib = HGLOBAL(h_dib_handle.0 as *mut std::ffi::c_void);
                 let ptr = GlobalLock(h_dib);
                 if ptr.is_null() {
+                    println!("[后端] ✗ GlobalLock 失败，无法锁定内存");
                     let _ = CloseClipboard();
                     return Ok(None);
                 }
                 
                 let size = GlobalSize(h_dib) as usize;
+                println!("[后端] DIB 数据大小: {} 字节", size);
                 if size < 40 {
                     // DIB 头至少需要 40 字节
+                    println!("[后端] ✗ DIB 数据太小 (< 40 字节)，不符合 BITMAPINFOHEADER 要求");
                     let _ = GlobalUnlock(h_dib);
                     let _ = CloseClipboard();
                     return Ok(None);
@@ -371,7 +385,9 @@ fn get_clipboard_image() -> Result<Option<String>, String> {
                 
                 // 读取 BITMAPINFOHEADER 来确定偏移
                 let header_size = u32::from_le_bytes([dib_data[0], dib_data[1], dib_data[2], dib_data[3]]);
+                println!("[后端] BITMAPINFOHEADER 大小: {} 字节", header_size);
                 let offset = if header_size == 124 { 124 } else { 40 }; // DIBV5 or DIB
+                println!("[后端] 使用偏移量: {} 字节", offset);
                 
                 // 构造 BMP 文件头（14 字节）
                 let mut bmp_data = Vec::with_capacity(size + 14);
@@ -381,27 +397,34 @@ fn get_clipboard_image() -> Result<Option<String>, String> {
                 bmp_data.extend_from_slice(&[0u8; 4]); // reserved
                 bmp_data.extend_from_slice(&((offset + 14) as u32).to_le_bytes()); // offset to pixel data
                 bmp_data.extend_from_slice(dib_data);
+                println!("[后端] BMP 文件数据大小: {} 字节", bmp_data.len());
                 
                 let _ = GlobalUnlock(h_dib);
                 
                 // 使用 image crate 加载图片
+                println!("[后端] 尝试使用 image crate 加载 BMP 数据...");
                 match image::load_from_memory(&bmp_data) {
                     Ok(img) => {
+                        let (w, h) = img.dimensions();
+                        println!("[后端] ✓ 图片加载成功: {}x{} 像素", w, h);
+                        
                         // 限制最大尺寸
                         let max_size = 800;
-                        let (w, h) = img.dimensions();
                         let processed_img = if w > max_size || h > max_size {
                             let ratio = (max_size as f32 / w.max(h) as f32).min(1.0);
                             let new_width = (w as f32 * ratio) as u32;
                             let new_height = (h as f32 * ratio) as u32;
+                            println!("[后端] 图片过大，缩放至: {}x{} 像素", new_width, new_height);
                             img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
                         } else {
                             img
                         };
                         
                         // 编码为 PNG bytes
+                        println!("[后端] 编码为 PNG 格式...");
                         let mut png_bytes = Vec::new();
                         {
+                            use image::ImageEncoder;
                             let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
                             encoder.write_image(
                                 processed_img.as_bytes(),
@@ -409,27 +432,36 @@ fn get_clipboard_image() -> Result<Option<String>, String> {
                                 processed_img.height(),
                                 processed_img.color(),
                             )
-                            .map_err(|e| format!("编码 PNG 失败: {}", e))?;
+                            .map_err(|e| {
+                                println!("[后端] ✗ PNG 编码失败: {}", e);
+                                format!("编码 PNG 失败: {}", e)
+                            })?;
                         }
+                        println!("[后端] ✓ PNG 编码完成，大小: {} 字节", png_bytes.len());
                         
                         // 转换为 base64
                         let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                        Some(format!("data:image/png;base64,{}", base64_data))
+                        let result = Some(format!("data:image/png;base64,{}", base64_data));
+                        println!("[后端] ✓ Base64 编码完成，总长度: {} 字符", base64_data.len());
+                        result
                     }
                     Err(e) => {
-                        eprintln!("加载剪贴板图片失败: {}", e);
+                        println!("[后端] ✗ 加载剪贴板图片失败: {}", e);
                         None
                     }
                 }
             };
             
             let _ = CloseClipboard();
+            println!("[后端] 剪贴板已关闭");
+            println!("[后端] === get_clipboard_image 完成 ===");
             Ok(result)
         }
     }
     
     #[cfg(not(target_os = "windows"))]
     {
+        println!("[后端] get_clipboard_image: 非 Windows 平台，返回 None");
         Ok(None)
     }
 }

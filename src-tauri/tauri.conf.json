@@ -11,7 +11,13 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": []
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self' asset: https://asset.localhost http://asset.localhost data: blob: 'unsafe-inline' 'unsafe-eval'; img-src 'self' asset: https://asset.localhost http://asset.localhost data: blob: http://localhost:* http://127.0.0.1:*; connect-src 'self' asset: https://asset.localhost http://asset.localhost http://localhost:* http://127.0.0.1:* https:;",
+      "assetProtocol": {
+        "scope": ["**"]
+      }
+    }
   },
   "bundle": {
     "active": true,

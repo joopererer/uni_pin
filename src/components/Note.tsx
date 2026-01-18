@@ -104,7 +104,9 @@ function Note({ noteId }: NoteProps) {
       // 优先使用 data-image-path 属性（如果存在）
       if (dataPath) {
         try {
-          img.src = convertFileSrc(dataPath);
+          // 规范化路径：将 Windows 反斜杠转换为正斜杠
+          const normalizedDataPath = dataPath.replace(/\\/g, '/');
+          img.src = convertFileSrc(normalizedDataPath);
           return; // 已处理，继续下一个
         } catch (e) {
           console.error("转换图片路径失败:", e);
@@ -309,20 +311,29 @@ function Note({ noteId }: NoteProps) {
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     let foundImage = false;
+    let triedWindowsAPI = false;
+    
+    console.log("=== [粘贴事件] 开始处理粘贴操作 ===");
     
     // 调试：打印所有剪贴板项目
     if (items && items.length > 0) {
-      console.log("剪贴板项目数量:", items.length);
+      console.log(`[粘贴事件] 剪贴板项目数量: ${items.length}`);
       for (let i = 0; i < items.length; i++) {
-        console.log(`项目 ${i}: type="${items[i].type}", kind="${items[i].kind}"`);
+        const item = items[i];
+        console.log(`[粘贴事件] 项目 ${i}: type="${item.type}", kind="${item.kind}"`);
       }
+    } else {
+      console.log("[粘贴事件] 剪贴板为空或无法访问");
     }
     
-    // 先尝试使用浏览器的 Clipboard API 检测图片
+    // 步骤1：先尝试使用浏览器的 Clipboard API 检测图片
     if (items) {
+      console.log("[粘贴事件] 步骤1: 尝试使用浏览器 Clipboard API 检测图片");
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         const type = item.type.toLowerCase();
+        
+        console.log(`[粘贴事件] 检查项目 ${i}: kind="${item.kind}", type="${item.type}"`);
         
         // 检查是否是图片类型（扩展检测范围）
         if (item.kind === "file" && (
@@ -333,82 +344,199 @@ function Note({ noteId }: NoteProps) {
           type.includes("gif") ||
           type.includes("webp")
         )) {
+          console.log(`[粘贴事件] ✓ 检测到图片类型: ${type}`);
           // 找到图片时才阻止默认行为
           e.preventDefault();
           try {
             const file = item.getAsFile();
             if (file && file.size > 0) {
-              console.log("从浏览器剪贴板读取到图片文件:", {
+              console.log("[粘贴事件] ✓ 成功读取图片文件:", {
                 name: file.name || "未命名",
                 type: file.type,
-                size: file.size
+                size: file.size,
+                lastModified: new Date(file.lastModified).toISOString()
               });
               await insertImage(file);
               foundImage = true;
+              console.log("[粘贴事件] ✓ 图片插入成功，处理完成");
               return;
+            } else {
+              console.warn("[粘贴事件] ✗ 读取到的文件为空或大小为0:", file);
             }
           } catch (err) {
-            console.error("读取图片文件失败:", err);
+            console.error("[粘贴事件] ✗ 读取图片文件时发生错误:", err);
             // 如果读取失败，不阻止默认行为，让文本继续粘贴
             foundImage = false;
           }
         }
       }
+      console.log("[粘贴事件] 步骤1完成: 浏览器 API 未找到图片");
     }
     
-    // 如果浏览器 API 没有找到图片，尝试使用 Windows 系统剪贴板 API
-    // 只有在确认可能包含图片时才调用（避免不必要的 API 调用影响文本粘贴）
+    // 步骤2：如果浏览器 API 没有找到图片，尝试使用 Windows 系统剪贴板 API
+    // 对于网络图片（从网页复制），浏览器剪贴板可能不会暴露文件类型，但 Windows 剪贴板可能包含 DIB 格式
+    // 所以我们总是尝试 Windows API（如果浏览器 API 没找到图片）
     if (!foundImage) {
-      // 检查是否可能是图片（检查是否有文件类型但浏览器 API 没识别）
-      const hasFileType = items && Array.from(items).some(item => item.kind === "file");
-      
-      if (hasFileType) {
-        // 只有在有文件类型时才尝试 Windows API
-        try {
-          console.log("尝试使用 Windows 系统剪贴板 API...");
-          const clipboardImage = await invoke<string | null>("get_clipboard_image");
-          if (clipboardImage) {
-            e.preventDefault();
-            console.log("从 Windows 剪贴板读取到图片");
+      triedWindowsAPI = true;
+      console.log("[粘贴事件] 步骤2: 尝试使用 Windows 系统剪贴板 API");
+      console.log("[粘贴事件] 提示: 浏览器 API 可能无法识别所有图片格式（特别是从网页复制的图片），尝试使用系统 API...");
+      try {
+        const clipboardImage = await invoke<string | null>("get_clipboard_image");
+        console.log(`[粘贴事件] Windows API 返回结果: ${clipboardImage ? "找到图片" : "未找到图片"}`);
+        if (clipboardImage) {
+          e.preventDefault();
+          console.log("[粘贴事件] ✓ 从 Windows 剪贴板读取到图片数据，开始转换...");
+          try {
             // 将 base64 数据转换为 Blob 并插入
             const response = await fetch(clipboardImage);
             const blob = await response.blob();
+            console.log(`[粘贴事件] ✓ Base64 数据转换为 Blob 成功: type="${blob.type}", size=${blob.size}`);
             const file = new File([blob], "clipboard-image.png", { type: "image/png" });
             await insertImage(file);
             foundImage = true;
+            console.log("[粘贴事件] ✓ 图片插入成功，处理完成");
             return;
+          } catch (err) {
+            console.error("[粘贴事件] ✗ Base64 转换或插入图片时发生错误:", err);
+            const errorDetails = err instanceof Error ? err.message : String(err);
+            console.error(`[粘贴事件] 错误详情: ${errorDetails}`);
           }
-        } catch (err) {
-          console.error("从 Windows 剪贴板读取图片失败:", err);
+        } else {
+          console.log("[粘贴事件] Windows API 返回 None，剪贴板中可能没有图片或格式不支持");
         }
+      } catch (err) {
+        console.error("[粘贴事件] ✗ 调用 Windows 剪贴板 API 失败:", err);
+        const errorDetails = err instanceof Error ? err.message : String(err);
+        console.error(`[粘贴事件] 错误详情: ${errorDetails}`);
       }
+      console.log("[粘贴事件] 步骤2完成: Windows API 未找到图片");
+    }
+    
+    // 如果所有方式都尝试过但未找到图片
+    if (!foundImage && triedWindowsAPI) {
+      console.warn("[粘贴事件] ✗ 所有图片检测方式都失败，可能原因：");
+      console.warn("  1. 剪贴板中确实没有图片");
+      console.warn("  2. 图片格式不被支持");
+      console.warn("  3. 剪贴板访问权限问题");
+      console.warn("  4. 图片格式无法被识别");
+      // 显示提示给用户
+      alert(t("note.imagePasteFailed") || "无法识别剪贴板中的图片。请确认：\n1. 剪贴板中确实包含图片\n2. 图片格式受支持（PNG、JPEG、GIF、WebP）\n3. 如果是网页图片，请尝试右键另存为后再粘贴");
     }
     
     // 如果没有找到图片，不调用 preventDefault，让文本正常粘贴
     if (!foundImage) {
-      console.log("未找到图片，允许默认粘贴行为（文本等）");
+      console.log("[粘贴事件] 未找到图片，允许默认粘贴行为（文本等）");
     }
-  }, []);
+    console.log("=== [粘贴事件] 处理完成 ===");
+  }, [t]);
 
   // 插入图片
   const insertImage = async (file: File) => {
+    console.log("=== [插入图片] 开始处理图片文件 ===");
+    console.log("[插入图片] 文件信息:", {
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      lastModified: new Date(file.lastModified).toISOString()
+    });
+    
     const reader = new FileReader();
     reader.onload = async (e) => {
       const base64 = e.target?.result as string;
+      console.log(`[插入图片] FileReader 完成，Base64 长度: ${base64.length} 字符`);
+      
+      if (!base64 || !base64.startsWith("data:")) {
+        console.error("[插入图片] ✗ Base64 数据格式无效");
+        alert(t("note.imagePasteFailed") || "图片数据格式无效，请重试");
+        return;
+      }
       
       try {
+        console.log("[插入图片] 调用后端 save_image 命令...");
         const savedPath = await invoke<string>("save_image", { imageData: base64 });
+        console.log(`[插入图片] ✓ 图片已保存到: ${savedPath}`);
         
         const img = document.createElement("img");
-        // 使用 convertFileSrc 转换文件路径为可访问的 URL
-        img.src = convertFileSrc(savedPath);
+        // 规范化路径：将 Windows 反斜杠转换为正斜杠
+        // convertFileSrc 可能需要标准化的路径格式
+        const normalizedPath = savedPath.replace(/\\/g, '/');
+        console.log(`[插入图片] 规范化路径: ${normalizedPath}`);
+        
+        // 辅助函数：从 base64 创建 Blob URL
+        const createBlobUrlFromBase64 = (base64Data: string): string => {
+          // base64 数据格式: "data:image/png;base64,iVBORw0KG..."
+          const parts = base64Data.split(',');
+          if (parts.length !== 2) {
+            throw new Error("无效的 base64 数据格式");
+          }
+          const mimeType = parts[0].match(/data:([^;]+)/)?.[1] || 'image/jpeg';
+          const base64Content = parts[1];
+          
+          // 解码 base64 为二进制数据
+          const binaryString = atob(base64Content);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          
+          // 创建 Blob 并生成 URL
+          const blob = new Blob([bytes], { type: mimeType });
+          return URL.createObjectURL(blob);
+        };
+        
+        // 尝试使用 convertFileSrc，但如果失败则使用 Blob URL 作为回退
+        // 在开发模式下，asset.localhost 可能无法工作，所以我们需要回退方案
+        let imageUrl: string;
+        let useBlobUrl = false;
+        
+        try {
+          imageUrl = convertFileSrc(normalizedPath);
+          console.log(`[插入图片] 图片 URL (convertFileSrc): ${imageUrl}`);
+          
+          // 如果 URL 包含 asset.localhost，直接使用 Blob URL 作为回退（因为已知会失败）
+          if (imageUrl.includes('asset.localhost')) {
+            console.log("[插入图片] 检测到 asset.localhost URL，直接使用 Blob URL");
+            imageUrl = createBlobUrlFromBase64(base64);
+            useBlobUrl = true;
+            console.log(`[插入图片] 图片 URL (Blob): ${imageUrl}`);
+          }
+        } catch (e) {
+          console.warn("[插入图片] convertFileSrc 失败，使用 Blob URL:", e);
+          imageUrl = createBlobUrlFromBase64(base64);
+          useBlobUrl = true;
+          console.log(`[插入图片] 图片 URL (Blob fallback): ${imageUrl}`);
+        }
+        
+        img.src = imageUrl;
         // 保存原始文件路径作为 data 属性，方便后续处理
         img.setAttribute("data-image-path", savedPath);
+        // 如果使用 Blob URL，也保存标记
+        if (useBlobUrl) {
+          img.setAttribute("data-use-blob", "true");
+        }
         img.className = "note-image";
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
         img.style.margin = "8px 0";
         img.style.cursor = "pointer";
+        img.onload = () => {
+          console.log("[插入图片] ✓ 图片元素加载成功");
+        };
+        img.onerror = (err) => {
+          console.error("[插入图片] ✗ 图片元素加载失败:", err);
+          // 如果 convertFileSrc 的 URL 加载失败，尝试使用 Blob URL
+          if (!useBlobUrl && (imageUrl.includes('asset.localhost') || imageUrl.includes('asset://'))) {
+            console.log("[插入图片] asset URL 加载失败，尝试使用 Blob URL 回退");
+            try {
+              const blobUrl = createBlobUrlFromBase64(base64);
+              img.src = blobUrl;
+              img.setAttribute("data-use-blob", "true");
+              console.log(`[插入图片] 已切换到 Blob URL: ${blobUrl}`);
+            } catch (e) {
+              console.error("[插入图片] ✗ Blob URL 创建也失败:", e);
+            }
+          }
+        };
         img.onclick = () => {
           setImageToDelete(img);
           setShowDeleteImageConfirm(true);
@@ -423,16 +551,25 @@ function Note({ noteId }: NoteProps) {
           range.collapse(true);
           selection.removeAllRanges();
           selection.addRange(range);
+          console.log("[插入图片] ✓ 图片已插入到当前光标位置");
         } else if (contentRef.current) {
           contentRef.current.appendChild(img);
+          console.log("[插入图片] ✓ 图片已追加到内容末尾");
         }
 
         handleContentChange();
+        console.log("=== [插入图片] 处理完成 ===");
       } catch (err) {
-        console.error("保存图片失败:", err);
+        console.error("[插入图片] ✗ 保存图片失败:", err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        console.error("[插入图片] 错误详情:", errorMessage);
         // 如果保存失败，显示错误提示，不插入图片
-        alert(t("note.imageSaveFailed") || "保存图片失败，请重试");
+        alert(t("note.imageSaveFailed") || `保存图片失败: ${errorMessage}\n请重试`);
       }
+    };
+    reader.onerror = (err) => {
+      console.error("[插入图片] ✗ FileReader 读取失败:", err);
+      alert(t("note.imagePasteFailed") || "读取图片文件失败，请重试");
     };
     reader.readAsDataURL(file);
   };
