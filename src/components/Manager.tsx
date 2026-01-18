@@ -59,7 +59,6 @@ function Manager() {
     };
     init();
 
-    // 更频繁地刷新以同步状态
     const interval = setInterval(loadNotes, 1000);
     return () => clearInterval(interval);
   }, [loadNotes, loadSettings]);
@@ -67,13 +66,12 @@ function Manager() {
   // 创建新便签
   const handleCreateNote = async () => {
     try {
-      console.log("Creating new note...");
-      const result = await invoke("create_note_window");
+      const result = await invoke<string>("create_note_window");
       console.log("Created note:", result);
+      // 立即刷新列表
       await loadNotes();
     } catch (e) {
       console.error("创建便签失败:", e);
-      alert("创建便签失败: " + e);
     }
   };
 
@@ -84,7 +82,6 @@ function Manager() {
       return;
     }
     try {
-      console.log("Showing note:", id);
       await invoke("show_note", { id });
       await loadNotes();
     } catch (e) {
@@ -95,7 +92,6 @@ function Manager() {
   // 隐藏便签
   const handleHideNote = async (id: string) => {
     try {
-      console.log("Hiding note:", id);
       await invoke("hide_note", { id });
       await loadNotes();
     } catch (e) {
@@ -117,9 +113,7 @@ function Manager() {
   // 显示所有便签
   const handleShowAll = async () => {
     try {
-      console.log("Showing all notes...");
       for (const note of notes) {
-        console.log(`Showing note ${note.id}, closed: ${note.closed}`);
         await invoke("show_note", { id: note.id });
       }
       await loadNotes();
@@ -282,6 +276,18 @@ function Manager() {
         </div>
       </div>
 
+      {/* 设置面板 - 移到搜索栏上方 */}
+      <div className="settings-panel">
+        <h3>⚙️ 设置</h3>
+        <div className="setting-item">
+          <span className="setting-label">开机自动启动</span>
+          <div
+            className={`toggle-switch ${autoStart ? "active" : ""}`}
+            onClick={handleToggleAutoStart}
+          />
+        </div>
+      </div>
+
       {/* 搜索和多选控制 */}
       <div className="search-bar">
         <div className="search-input-wrapper">
@@ -328,18 +334,6 @@ function Manager() {
           </button>
         </div>
       )}
-
-      {/* 设置面板 */}
-      <div className="settings-panel">
-        <h3>⚙️ 设置</h3>
-        <div className="setting-item">
-          <span className="setting-label">开机自动启动</span>
-          <div
-            className={`toggle-switch ${autoStart ? "active" : ""}`}
-            onClick={handleToggleAutoStart}
-          />
-        </div>
-      </div>
 
       {/* 便签列表 */}
       {filteredNotes.length === 0 ? (

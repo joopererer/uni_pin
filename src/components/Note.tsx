@@ -31,7 +31,7 @@ function Note({ noteId }: NoteProps) {
   const [themeIndex, setThemeIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [opacity, setOpacity] = useState(0);
-  const [alwaysOnTop, setAlwaysOnTop] = useState(false); // 默认不置顶
+  const [alwaysOnTop, setAlwaysOnTop] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showOpacitySlider, setShowOpacitySlider] = useState(false);
@@ -52,7 +52,6 @@ function Note({ noteId }: NoteProps) {
 
   // 工具栏显示逻辑
   useEffect(() => {
-    // 编辑中或鼠标悬停时显示
     if (isEditing || isHovering) {
       setShowToolbar(true);
       if (toolbarHideTimeoutRef.current) {
@@ -60,9 +59,9 @@ function Note({ noteId }: NoteProps) {
         toolbarHideTimeoutRef.current = null;
       }
     } else {
-      // 非编辑且非悬停时，延迟隐藏
       toolbarHideTimeoutRef.current = setTimeout(() => {
         setShowToolbar(false);
+        setShowOpacitySlider(false);
       }, 1500);
     }
     
@@ -94,7 +93,7 @@ function Note({ noteId }: NoteProps) {
           contentRef.current.innerHTML = data.content || "";
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
-          setAlwaysOnTop(data.always_on_top === true); // 默认 false
+          setAlwaysOnTop(data.always_on_top === true);
         }
         setIsLoaded(true);
         await invoke("show_note_window", { id: noteId });
@@ -179,7 +178,7 @@ function Note({ noteId }: NoteProps) {
     };
   }, [noteId]);
 
-  // 处理粘贴事件 - 图片保存到 AppData
+  // 处理粘贴事件
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -197,7 +196,7 @@ function Note({ noteId }: NoteProps) {
     }
   }, []);
 
-  // 插入图片（保存到 AppData）
+  // 插入图片
   const insertImage = async (file: File) => {
     const reader = new FileReader();
     reader.onload = async (e) => {
@@ -324,12 +323,6 @@ function Note({ noteId }: NoteProps) {
     handleContentChange();
   };
 
-  // 双击进入编辑模式
-  const handleDoubleClick = () => {
-    setIsEditing(true);
-    contentRef.current?.focus();
-  };
-
   // 鼠标进入/离开
   const handleMouseEnter = () => {
     setIsHovering(true);
@@ -342,8 +335,6 @@ function Note({ noteId }: NoteProps) {
 
   // 计算实际的背景透明度
   const bgOpacity = (100 - opacity) / 100;
-  const bgColor = theme.bg;
-  const headerColor = theme.header;
 
   return (
     <div
@@ -352,15 +343,14 @@ function Note({ noteId }: NoteProps) {
       onContextMenu={handleContextMenu}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      onDoubleClick={handleDoubleClick}
       style={{
-        "--note-bg": bgColor,
-        "--note-header": headerColor,
+        "--note-bg": theme.bg,
+        "--note-header": theme.header,
         "--note-text": theme.text,
         "--note-opacity": bgOpacity,
       } as React.CSSProperties}
     >
-      {/* 顶部拖拽把手 */}
+      {/* 顶部拖拽把手 - 使用绝对定位，隐藏时不占空间 */}
       <div className={`note-header ${showToolbar ? 'visible' : ''}`} data-tauri-drag-region>
         <div className="drag-indicator" data-tauri-drag-region>
           <span data-tauri-drag-region></span>
@@ -368,7 +358,6 @@ function Note({ noteId }: NoteProps) {
           <span data-tauri-drag-region></span>
         </div>
 
-        {/* 置顶状态指示 */}
         {alwaysOnTop && <span className="pin-indicator" title="已置顶">📍</span>}
 
         {/* 工具栏 */}
@@ -385,7 +374,7 @@ function Note({ noteId }: NoteProps) {
             🎨
           </button>
 
-          {/* 透明度调节 - 移到颜色后面 */}
+          {/* 透明度调节 - 简单下拉样式 */}
           <div className="opacity-control">
             <button
               className="toolbar-btn"
@@ -450,7 +439,7 @@ function Note({ noteId }: NoteProps) {
           <button onClick={handleToggleAlwaysOnTop}>
             {alwaysOnTop ? "📌 取消置顶" : "📍 置顶窗口"}
           </button>
-          <button onClick={() => { setShowOpacitySlider(true); setShowContextMenu(false); }}>
+          <button onClick={() => { setShowOpacitySlider(true); setShowContextMenu(false); setShowToolbar(true); }}>
             💧 调节透明度
           </button>
           <div className="menu-divider" />
