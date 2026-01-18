@@ -20,6 +20,7 @@ body,
   width: 100%;
   height: 100%;
   background: var(--note-bg, #fff9c4);
+  opacity: var(--note-opacity, 1);
   border-radius: 12px;
   box-shadow: 
     0 10px 40px rgba(0, 0, 0, 0.12),
@@ -27,6 +28,7 @@ body,
     inset 0 1px 0 rgba(255, 255, 255, 0.5);
   overflow: hidden;
   position: relative;
+  animation: noteAppear 0.2s ease-out;
 }
 
 /* ============ 顶部拖拽把手 ============ */
@@ -42,7 +44,6 @@ body,
   flex-shrink: 0;
 }
 
-/* 拖拽指示器 - 三条横线 */
 .drag-indicator {
   display: flex;
   flex-direction: column;
@@ -61,6 +62,13 @@ body,
   height: 2px;
   background: var(--note-text, #5d4037);
   border-radius: 1px;
+}
+
+/* 置顶指示器 */
+.pin-indicator {
+  font-size: 12px;
+  opacity: 0.6;
+  margin-left: 4px;
 }
 
 /* ============ 工具栏 ============ */
@@ -109,6 +117,108 @@ body,
   color: white;
 }
 
+/* ============ 透明度控制 ============ */
+.opacity-control {
+  position: relative;
+}
+
+.opacity-slider-popup {
+  position: absolute;
+  top: 30px;
+  right: 0;
+  background: white;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.opacity-slider {
+  flex: 1;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: #ddd;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #5d4037;
+  cursor: pointer;
+}
+
+.opacity-value {
+  font-size: 12px;
+  color: #666;
+  min-width: 35px;
+  text-align: right;
+}
+
+/* ============ 右键菜单 ============ */
+.context-menu {
+  position: fixed;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+  padding: 6px 0;
+  min-width: 160px;
+  z-index: 1000;
+  animation: menuAppear 0.15s ease-out;
+}
+
+.context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: #333;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.context-menu button:hover {
+  background: #f0f0f0;
+}
+
+.context-menu button.danger {
+  color: #ef5350;
+}
+
+.context-menu button.danger:hover {
+  background: #ffebee;
+}
+
+.menu-divider {
+  height: 1px;
+  background: #eee;
+  margin: 4px 0;
+}
+
+@keyframes menuAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* ============ 内容编辑区域 ============ */
 .note-content {
   flex: 1;
@@ -123,7 +233,6 @@ body,
   white-space: pre-wrap;
 }
 
-/* 占位符文字 */
 .note-content:empty::before {
   content: attr(data-placeholder);
   color: var(--note-text, #5d4037);
@@ -132,12 +241,10 @@ body,
   pointer-events: none;
 }
 
-/* 内容区选中样式 */
 .note-content::selection {
   background: rgba(0, 0, 0, 0.15);
 }
 
-/* 图片样式 */
 .note-content img,
 .note-image {
   max-width: 100%;
@@ -190,7 +297,6 @@ body,
   opacity: 0.4;
 }
 
-/* ============ 链接样式 ============ */
 .note-content a {
   color: var(--note-text, #5d4037);
   text-decoration: underline;
@@ -208,6 +314,245 @@ body,
   }
 }
 
-.note-container {
-  animation: noteAppear 0.2s ease-out;
+/* ============ 管理中心样式 ============ */
+.manager-container {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 24px;
+  font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+
+.manager-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.manager-header h1 {
+  color: white;
+  font-size: 24px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.manager-header h1 span {
+  font-size: 28px;
+}
+
+.manager-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.manager-btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s;
+}
+
+.manager-btn.primary {
+  background: white;
+  color: #667eea;
+}
+
+.manager-btn.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.manager-btn.secondary {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.manager-btn.secondary:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.notes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.note-card {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.note-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+}
+
+.note-card-header {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.note-card-color {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+}
+
+.note-card-status {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.note-card-status.hidden {
+  background: #fff3e0;
+  color: #e65100;
+}
+
+.note-card-content {
+  padding: 0 12px 12px;
+  height: 80px;
+  overflow: hidden;
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+}
+
+.note-card-footer {
+  padding: 12px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.note-card-date {
+  font-size: 11px;
+  color: #999;
+}
+
+.note-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.note-card-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: #f5f5f5;
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.note-card-btn:hover {
+  background: #e0e0e0;
+}
+
+.note-card-btn.danger:hover {
+  background: #ffebee;
+  color: #ef5350;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.empty-state span {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 16px;
+}
+
+.empty-state p {
+  font-size: 16px;
+  margin-bottom: 24px;
+}
+
+/* 设置面板 */
+.settings-panel {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.settings-panel h3 {
+  color: white;
+  font-size: 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.setting-item:last-child {
+  border-bottom: none;
+}
+
+.setting-label {
+  color: white;
+  font-size: 14px;
+}
+
+/* Toggle 开关 */
+.toggle-switch {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 13px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.toggle-switch.active {
+  background: #4caf50;
+}
+
+.toggle-switch::after {
+  content: "";
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: transform 0.2s;
+}
+
+.toggle-switch.active::after {
+  transform: translateX(22px);
 }

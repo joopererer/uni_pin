@@ -1,6 +1,6 @@
 mod note_store;
 
-use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize};
+use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -10,6 +10,7 @@ use tauri::{
 use image::GenericImageView;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use uuid::Uuid;
+use base64::Engine;
 
 /// 使用 UUID 生成唯一的窗口标签
 fn generate_window_label() -> String {
@@ -18,16 +19,16 @@ fn generate_window_label() -> String {
 
 /// 创建一个新的便签窗口（内部使用）
 fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) -> Result<String, String> {
-    let (window_label, position, size) = match note_data {
+    let (window_label, position, size, always_on_top) = match note_data {
         Some(data) => (
             data.id.clone(),
             Some((data.position.x, data.position.y)),
             (data.size.width, data.size.height),
+            data.always_on_top,
         ),
-        None => (generate_window_label(), None, (280.0, 320.0)),
+        None => (generate_window_label(), None, (280.0, 320.0), true),
     };
 
-    // 创建窗口构建器 - 初始不可见，等前端加载完成后再显示
     let mut builder = WebviewWindowBuilder::new(
         app,
         &window_label,
@@ -38,13 +39,12 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
     .min_inner_size(200.0, 150.0)
     .decorations(false)
     .transparent(true)
-    .always_on_top(true)
+    .always_on_top(always_on_top)
     .skip_taskbar(true)
     .resizable(true)
-    .visible(false)  // 初始不可见
+    .visible(false)
     .focused(true);
 
-    // 设置位置（使用逻辑坐标）
     if let Some((x, y)) = position {
         builder = builder.position(x, y);
     } else {
@@ -55,7 +55,6 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
         .build()
         .map_err(|e| format!("创建窗口失败: {}", e))?;
 
-    // 如果是新便签，添加到存储
     if note_data.is_none() {
         if let Some(state) = app.try_state::<NoteStoreState>() {
             let mut store = state.0.lock().unwrap();
@@ -68,13 +67,45 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
     Ok(window_label)
 }
 
-/// Tauri 命令：创建新便签窗口
+/// 创建管理中心窗口
+fn create_manager_window(app: &AppHandle) -> Result<(), String> {
+    // 检查是否已存在
+    if app.get_webview_window("manager").is_some() {
+        if let Some(w) = app.get_webview_window("manager") {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(
+        app,
+        "manager",
+        WebviewUrl::App("manager.html".into()),
+    )
+    .title("便签管理中心")
+    .inner_size(600.0, 500.0)
+    .min_inner_size(400.0, 300.0)
+    .decorations(true)
+    .transparent(false)
+    .resizable(true)
+    .center()
+    .build()
+    .map_err(|e| format!("创建管理窗口失败: {}", e))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 fn create_note_window(app: AppHandle) -> Result<String, String> {
     create_note_window_internal(&app, None)
 }
 
-/// Tauri 命令：显示窗口（前端加载完成后调用）
+#[tauri::command]
+fn open_manager(app: AppHandle) -> Result<(), String> {
+    create_manager_window(&app)
+}
+
 #[tauri::command]
 fn show_note_window(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(&id) {
@@ -84,7 +115,6 @@ fn show_note_window(app: AppHandle, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Tauri 命令：保存便签数据
 #[tauri::command]
 fn save_note(
     state: State<'_, NoteStoreState>,
@@ -109,7 +139,6 @@ fn save_note(
     Ok(())
 }
 
-/// Tauri 命令：更新便签窗口位置（接收逻辑坐标）
 #[tauri::command]
 fn update_note_position(
     state: State<'_, NoteStoreState>,
@@ -118,16 +147,13 @@ fn update_note_position(
     y: f64,
 ) -> Result<(), String> {
     let mut store = state.0.lock().unwrap();
-    
     if let Some(note) = store.notes.get_mut(&id) {
         note.position = WindowPosition { x, y };
         save_notes(&store)?;
     }
-    
     Ok(())
 }
 
-/// Tauri 命令：更新便签窗口大小
 #[tauri::command]
 fn update_note_size(
     state: State<'_, NoteStoreState>,
@@ -136,45 +162,104 @@ fn update_note_size(
     height: f64,
 ) -> Result<(), String> {
     let mut store = state.0.lock().unwrap();
-    
     if let Some(note) = store.notes.get_mut(&id) {
         note.size = WindowSize { width, height };
         save_notes(&store)?;
     }
-    
     Ok(())
 }
 
-/// Tauri 命令：获取便签数据
+#[tauri::command]
+fn update_note_opacity(
+    _app: AppHandle,
+    state: State<'_, NoteStoreState>,
+    id: String,
+    opacity: u32,
+) -> Result<(), String> {
+    let opacity = opacity.min(90); // 最大90%透明
+    let mut store = state.0.lock().unwrap();
+    if let Some(note) = store.notes.get_mut(&id) {
+        note.opacity = opacity;
+    }
+    save_notes(&store)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn toggle_always_on_top(
+    app: AppHandle,
+    state: State<'_, NoteStoreState>,
+    id: String,
+) -> Result<bool, String> {
+    let new_state = {
+        let mut store = state.0.lock().unwrap();
+        if let Some(note) = store.notes.get_mut(&id) {
+            note.always_on_top = !note.always_on_top;
+            let state = note.always_on_top;
+            save_notes(&store)?;
+            state
+        } else {
+            return Err("便签不存在".to_string());
+        }
+    };
+    
+    // 更新窗口状态
+    if let Some(window) = app.get_webview_window(&id) {
+        window.set_always_on_top(new_state)
+            .map_err(|e| format!("设置置顶失败: {}", e))?;
+    }
+    
+    Ok(new_state)
+}
+
 #[tauri::command]
 fn get_note(state: State<'_, NoteStoreState>, id: String) -> Option<NoteData> {
     let store = state.0.lock().unwrap();
     store.notes.get(&id).cloned()
 }
 
-/// Tauri 命令：隐藏便签窗口（不删除数据）
+#[tauri::command]
+fn get_all_notes(state: State<'_, NoteStoreState>) -> Vec<NoteData> {
+    let store = state.0.lock().unwrap();
+    store.notes.values().cloned().collect()
+}
+
 #[tauri::command]
 fn hide_note(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(&id) {
         window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))?;
     }
-    println!("🔽 隐藏便签: {}", id);
     Ok(())
 }
 
-/// Tauri 命令：删除便签（永久删除）
+#[tauri::command]
+fn show_note(app: AppHandle, state: State<'_, NoteStoreState>, id: String) -> Result<(), String> {
+    // 检查窗口是否存在
+    if let Some(window) = app.get_webview_window(&id) {
+        window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
+        window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+    } else {
+        // 窗口不存在，需要重新创建
+        let store = state.0.lock().unwrap();
+        if let Some(note) = store.notes.get(&id) {
+            let note_clone = note.clone();
+            drop(store);
+            create_note_window_internal(&app, Some(&note_clone))?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn delete_note(
     app: AppHandle,
     state: State<'_, NoteStoreState>,
     id: String,
 ) -> Result<(), String> {
-    // 关闭窗口
     if let Some(window) = app.get_webview_window(&id) {
         window.close().map_err(|e| format!("关闭窗口失败: {}", e))?;
     }
     
-    // 从存储中删除
     let mut store = state.0.lock().unwrap();
     store.notes.remove(&id);
     save_notes(&store)?;
@@ -183,7 +268,6 @@ fn delete_note(
     Ok(())
 }
 
-/// Tauri 命令：获取窗口的逻辑坐标位置
 #[tauri::command]
 fn get_window_position(app: AppHandle, id: String) -> Result<(f64, f64), String> {
     if let Some(window) = app.get_webview_window(&id) {
@@ -198,7 +282,6 @@ fn get_window_position(app: AppHandle, id: String) -> Result<(f64, f64), String>
     }
 }
 
-/// Tauri 命令：获取窗口的逻辑尺寸
 #[tauri::command]
 fn get_window_size(app: AppHandle, id: String) -> Result<(f64, f64), String> {
     if let Some(window) = app.get_webview_window(&id) {
@@ -213,7 +296,6 @@ fn get_window_size(app: AppHandle, id: String) -> Result<(f64, f64), String> {
     }
 }
 
-/// Tauri 命令：获取所有便签窗口的标签
 #[tauri::command]
 fn get_all_note_windows(app: AppHandle) -> Vec<String> {
     app.webview_windows()
@@ -223,7 +305,99 @@ fn get_all_note_windows(app: AppHandle) -> Vec<String> {
         .collect()
 }
 
-/// 恢复之前保存的便签窗口
+/// 保存图片到 AppData 目录（带压缩）
+#[tauri::command]
+fn save_image(image_data: String) -> Result<String, String> {
+    // 解析 base64 数据
+    let parts: Vec<&str> = image_data.split(',').collect();
+    if parts.len() != 2 {
+        return Err("无效的图片数据".to_string());
+    }
+    
+    let base64_data = parts[1];
+    let image_bytes = base64::engine::general_purpose::STANDARD.decode(base64_data)
+        .map_err(|e| format!("解码失败: {}", e))?;
+    
+    // 加载图片
+    let img = image::load_from_memory(&image_bytes)
+        .map_err(|e| format!("加载图片失败: {}", e))?;
+    
+    // 限制最大尺寸 (800x800)
+    let max_size = 800;
+    let (width, height) = img.dimensions();
+    let img = if width > max_size || height > max_size {
+        let ratio = (max_size as f32 / width.max(height) as f32).min(1.0);
+        let new_width = (width as f32 * ratio) as u32;
+        let new_height = (height as f32 * ratio) as u32;
+        img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
+    } else {
+        img
+    };
+    
+    // 生成文件名
+    let filename = format!("{}.jpg", Uuid::new_v4());
+    let filepath = get_images_dir().join(&filename);
+    
+    // 保存为 JPEG（压缩）
+    img.save(&filepath)
+        .map_err(|e| format!("保存图片失败: {}", e))?;
+    
+    // 返回文件路径
+    Ok(filepath.to_string_lossy().to_string())
+}
+
+/// 获取自启动状态
+#[tauri::command]
+fn get_auto_start(state: State<'_, NoteStoreState>) -> bool {
+    let store = state.0.lock().unwrap();
+    store.settings.auto_start
+}
+
+/// 设置自启动
+#[tauri::command]
+fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
+    // 更新存储
+    {
+        let mut store = state.0.lock().unwrap();
+        store.settings.auto_start = enabled;
+        save_notes(&store)?;
+    }
+    
+    // 配置 Windows 自启动
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("获取程序路径失败: {}", e))?;
+        
+        if enabled {
+            // 添加到注册表
+            let _ = Command::new("reg")
+                .args([
+                    "add",
+                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                    "/v", "StickyNotes",
+                    "/t", "REG_SZ",
+                    "/d", &exe_path.to_string_lossy(),
+                    "/f"
+                ])
+                .output();
+        } else {
+            // 从注册表移除
+            let _ = Command::new("reg")
+                .args([
+                    "delete",
+                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                    "/v", "StickyNotes",
+                    "/f"
+                ])
+                .output();
+        }
+    }
+    
+    Ok(())
+}
+
 fn restore_saved_notes(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let store = load_notes();
     let notes_to_restore: Vec<NoteData> = store.notes.values()
@@ -231,10 +405,8 @@ fn restore_saved_notes(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
         .cloned()
         .collect();
     
-    // 存储到状态
     app.manage(NoteStoreState(std::sync::Mutex::new(store)));
     
-    // 恢复窗口
     let count = notes_to_restore.len();
     for note in notes_to_restore {
         match create_note_window_internal(app, Some(&note)) {
@@ -250,9 +422,11 @@ fn restore_saved_notes(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     Ok(())
 }
 
-/// 设置全局快捷键
 fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let shortcut_alt_n = Shortcut::new(Some(Modifiers::ALT), Code::KeyN);
+
+    // 先检查并尝试注销可能已存在的快捷键
+    let _ = app.global_shortcut().unregister(shortcut_alt_n);
 
     app.global_shortcut().on_shortcut(shortcut_alt_n, {
         let app_handle = app.clone();
@@ -260,27 +434,22 @@ fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Err
             if event.state == ShortcutState::Pressed 
                 && shortcut == &Shortcut::new(Some(Modifiers::ALT), Code::KeyN) 
             {
-                println!("⌨️  快捷键 Alt+N 触发");
-                match create_note_window_internal(&app_handle, None) {
-                    Ok(label) => println!("✅ 通过快捷键创建便签: {}", label),
-                    Err(e) => eprintln!("❌ 创建便签失败: {}", e),
-                }
+                let _ = create_note_window_internal(&app_handle, None);
             }
         }
     })?;
 
-    println!("⌨️  已注册全局快捷键: Alt+N (创建新便签)");
     Ok(())
 }
 
-/// 设置系统托盘
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let new_note = MenuItem::with_id(app, "new_note", "📝 新建便签 (Alt+N)", true, None::<&str>)?;
-    let show_all = MenuItem::with_id(app, "show_all", "📋 显示全部", true, None::<&str>)?;
+    let manager = MenuItem::with_id(app, "manager", "📋 管理中心", true, None::<&str>)?;
+    let show_all = MenuItem::with_id(app, "show_all", "👁️ 显示全部", true, None::<&str>)?;
     let hide_all = MenuItem::with_id(app, "hide_all", "🔽 隐藏全部", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&new_note, &show_all, &hide_all, &quit])?;
+    let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &quit])?;
 
     let png_bytes = include_bytes!("../icons/32x32.png");
     let img = image::load_from_memory(png_bytes).expect("Failed to load icon");
@@ -291,7 +460,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let _tray = TrayIconBuilder::new()
         .icon(icon)
         .menu(&menu)
-        .tooltip("便签应用 - Alt+N 创建新便签")
+        .tooltip("便签应用 - 点击打开管理中心")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             handle_menu_event(app, event.id.as_ref());
@@ -304,26 +473,26 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             } = event
             {
                 let app = tray.app_handle();
-                let _ = create_note_window_internal(app, None);
+                let _ = create_manager_window(app);
             }
         })
         .build(app)?;
 
-    println!("🔔 系统托盘已设置");
     Ok(())
 }
 
-/// 处理托盘菜单事件
 fn handle_menu_event(app: &AppHandle, menu_id: &str) {
     match menu_id {
         "new_note" => {
             let _ = create_note_window_internal(app, None);
         }
+        "manager" => {
+            let _ = create_manager_window(app);
+        }
         "show_all" => {
             for (label, window) in app.webview_windows() {
                 if label.starts_with("note-") {
                     let _ = window.show();
-                    let _ = window.set_focus();
                 }
             }
         }
@@ -341,7 +510,6 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
     }
 }
 
-/// 运行 Tauri 应用
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -349,32 +517,31 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             create_note_window,
+            open_manager,
             show_note_window,
             save_note,
             update_note_position,
             update_note_size,
+            update_note_opacity,
+            toggle_always_on_top,
             get_note,
+            get_all_notes,
             hide_note,
+            show_note,
             delete_note,
             get_window_position,
             get_window_size,
-            get_all_note_windows
+            get_all_note_windows,
+            save_image,
+            get_auto_start,
+            set_auto_start
         ])
         .setup(|app| {
-            // 恢复保存的便签（这也会初始化状态）
             restore_saved_notes(app.handle())?;
-            
-            // 设置系统托盘
             setup_tray(app.handle())?;
-
-            // 设置全局快捷键
             setup_global_shortcuts(app.handle())?;
             
             println!("✨ 便签应用已启动！");
-            println!("📌 点击系统托盘图标创建新便签");
-            println!("⌨️  按 Alt+N 快速创建新便签");
-            println!("📋 右键托盘图标查看菜单");
-            
             Ok(())
         })
         .run(tauri::generate_context!())

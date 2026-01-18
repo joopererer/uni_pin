@@ -42,6 +42,19 @@ pub struct NoteData {
     pub size: WindowSize,
     /// 是否已关闭
     pub closed: bool,
+    /// 透明度 (0-90, 0为不透明)
+    #[serde(default)]
+    pub opacity: u32,
+    /// 是否置顶
+    #[serde(default = "default_always_on_top")]
+    pub always_on_top: bool,
+    /// 创建时间戳
+    #[serde(default)]
+    pub created_at: u64,
+}
+
+fn default_always_on_top() -> bool {
+    true
 }
 
 impl NoteData {
@@ -53,22 +66,37 @@ impl NoteData {
             position: WindowPosition::default(),
             size: WindowSize::default(),
             closed: false,
+            opacity: 0,
+            always_on_top: true,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         }
     }
+}
+
+/// 应用设置
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppSettings {
+    /// 开机自启动
+    #[serde(default)]
+    pub auto_start: bool,
 }
 
 /// 所有便签数据的存储结构
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct NotesStore {
     pub notes: HashMap<String, NoteData>,
+    #[serde(default)]
+    pub settings: AppSettings,
 }
 
 /// 全局便签存储（线程安全）
 pub struct NoteStoreState(pub Mutex<NotesStore>);
 
-
-/// 获取数据存储文件路径
-pub fn get_store_path() -> PathBuf {
+/// 获取数据存储目录
+pub fn get_data_dir() -> PathBuf {
     let data_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("sticky-notes");
@@ -78,7 +106,21 @@ pub fn get_store_path() -> PathBuf {
         let _ = fs::create_dir_all(&data_dir);
     }
     
-    data_dir.join("notes.json")
+    data_dir
+}
+
+/// 获取图片存储目录
+pub fn get_images_dir() -> PathBuf {
+    let images_dir = get_data_dir().join("images");
+    if !images_dir.exists() {
+        let _ = fs::create_dir_all(&images_dir);
+    }
+    images_dir
+}
+
+/// 获取数据存储文件路径
+pub fn get_store_path() -> PathBuf {
+    get_data_dir().join("notes.json")
 }
 
 /// 从文件加载便签数据
@@ -117,6 +159,5 @@ pub fn save_notes(store: &NotesStore) -> Result<(), String> {
     fs::write(&path, json)
         .map_err(|e| format!("写入文件失败: {}", e))?;
     
-    println!("💾 已保存 {} 个便签到 {:?}", store.notes.len(), path);
     Ok(())
 }

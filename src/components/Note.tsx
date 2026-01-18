@@ -12,7 +12,6 @@ const NOTE_THEMES = [
   { name: "purple", bg: "#e1bee7", header: "#ba68c8", text: "#4a148c" },
 ];
 
-// Rust 返回的便签数据类型
 interface NoteData {
   id: string;
   content: string;
@@ -20,6 +19,8 @@ interface NoteData {
   position: { x: number; y: number };
   size: { width: number; height: number };
   closed: boolean;
+  opacity: number;
+  always_on_top: boolean;
 }
 
 interface NoteProps {
@@ -29,13 +30,20 @@ interface NoteProps {
 function Note({ noteId }: NoteProps) {
   const [themeIndex, setThemeIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [opacity, setOpacity] = useState(0);
+  const [alwaysOnTop, setAlwaysOnTop] = useState(true);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
+  const [showOpacitySlider, setShowOpacitySlider] = useState(false);
+  
   const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const opacityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const theme = NOTE_THEMES[themeIndex];
 
-  // 从 Rust 后端加载保存的数据，然后显示窗口
+  // 加载便签数据
   useEffect(() => {
     const loadNoteAndShow = async () => {
       try {
@@ -43,10 +51,10 @@ function Note({ noteId }: NoteProps) {
         if (data && contentRef.current) {
           contentRef.current.innerHTML = data.content || "";
           setThemeIndex(data.theme_index || 0);
+          setOpacity(data.opacity || 0);
+          setAlwaysOnTop(data.always_on_top !== false);
         }
         setIsLoaded(true);
-        
-        // 数据加载完成后，显示窗口
         await invoke("show_note_window", { id: noteId });
       } catch (e) {
         console.error("加载便签数据失败:", e);
@@ -59,7 +67,7 @@ function Note({ noteId }: NoteProps) {
     loadNoteAndShow();
   }, [noteId]);
 
-  // 防抖保存到 Rust 后端
+  // 防抖保存
   const saveToBackend = useCallback(() => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -68,30 +76,22 @@ function Note({ noteId }: NoteProps) {
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         const content = contentRef.current?.innerHTML || "";
-        await invoke("save_note", {
-          id: noteId,
-          content,
-          themeIndex,
-        });
+        await invoke("save_note", { id: noteId, content, themeIndex });
       } catch (e) {
         console.error("保存便签失败:", e);
       }
     }, 500);
   }, [noteId, themeIndex]);
 
-  // 内容变化时保存
   const handleContentChange = useCallback(() => {
     saveToBackend();
   }, [saveToBackend]);
 
-  // 主题变化时保存
   useEffect(() => {
-    if (isLoaded) {
-      saveToBackend();
-    }
+    if (isLoaded) saveToBackend();
   }, [themeIndex, isLoaded, saveToBackend]);
 
-  // 监听窗口位置变化 - 使用逻辑坐标
+  // 监听窗口位置变化
   useEffect(() => {
     const appWindow = getCurrentWindow();
     let positionTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -100,7 +100,6 @@ function Note({ noteId }: NoteProps) {
       if (positionTimeout) clearTimeout(positionTimeout);
       positionTimeout = setTimeout(async () => {
         try {
-          // 从 Rust 获取逻辑坐标（已处理 DPI 缩放）
           const [x, y] = await invoke<[number, number]>("get_window_position", { id: noteId });
           await invoke("update_note_position", { id: noteId, x, y });
         } catch (e) {
@@ -115,7 +114,7 @@ function Note({ noteId }: NoteProps) {
     };
   }, [noteId]);
 
-  // 监听窗口大小变化 - 使用逻辑尺寸
+  // 监听窗口大小变化
   useEffect(() => {
     const appWindow = getCurrentWindow();
     let sizeTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -124,7 +123,6 @@ function Note({ noteId }: NoteProps) {
       if (sizeTimeout) clearTimeout(sizeTimeout);
       sizeTimeout = setTimeout(async () => {
         try {
-          // 从 Rust 获取逻辑尺寸（已处理 DPI 缩放）
           const [width, height] = await invoke<[number, number]>("get_window_size", { id: noteId });
           await invoke("update_note_size", { id: noteId, width, height });
         } catch (e) {
@@ -139,69 +137,75 @@ function Note({ noteId }: NoteProps) {
     };
   }, [noteId]);
 
-  // 处理粘贴事件 - 支持图片粘贴
-  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+  // 处理粘贴事件 - 图片保存到 AppData
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-
       if (item.type.startsWith("image/")) {
         e.preventDefault();
         const file = item.getAsFile();
         if (file) {
-          insertImage(file);
+          await insertImage(file);
         }
         return;
       }
     }
   }, []);
 
-  // 插入图片到编辑器
-  const insertImage = (file: File) => {
+  // 插入图片（保存到 AppData）
+  const insertImage = async (file: File) => {
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
       const base64 = e.target?.result as string;
+      
+      try {
+        // 保存到 AppData 并获取路径
+        const savedPath = await invoke<string>("save_image", { imageData: base64 });
+        
+        const img = document.createElement("img");
+        img.src = `file://${savedPath}`;
+        img.className = "note-image";
+        img.style.maxWidth = "100%";
+        img.style.borderRadius = "4px";
+        img.style.margin = "8px 0";
+        img.style.cursor = "pointer";
+        img.onclick = () => {
+          if (confirm("删除这张图片？")) {
+            img.remove();
+            handleContentChange();
+          }
+        };
 
-      const img = document.createElement("img");
-      img.src = base64;
-      img.className = "note-image";
-      img.style.maxWidth = "100%";
-      img.style.borderRadius = "4px";
-      img.style.margin = "8px 0";
-      img.style.cursor = "pointer";
-
-      img.onclick = () => {
-        if (confirm("删除这张图片？")) {
-          img.remove();
-          handleContentChange();
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount > 0 && contentRef.current?.contains(selection.anchorNode)) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          range.insertNode(img);
+          range.setStartAfter(img);
+          range.collapse(true);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else if (contentRef.current) {
+          contentRef.current.appendChild(img);
         }
-      };
 
-      const selection = window.getSelection();
-      if (
-        selection &&
-        selection.rangeCount > 0 &&
-        contentRef.current?.contains(selection.anchorNode)
-      ) {
-        const range = selection.getRangeAt(0);
-        range.deleteContents();
-        range.insertNode(img);
-        range.setStartAfter(img);
-        range.collapse(true);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      } else if (contentRef.current) {
-        contentRef.current.appendChild(img);
+        handleContentChange();
+      } catch (err) {
+        console.error("保存图片失败:", err);
+        // 回退到 base64
+        const img = document.createElement("img");
+        img.src = base64;
+        img.className = "note-image";
+        if (contentRef.current) contentRef.current.appendChild(img);
+        handleContentChange();
       }
-
-      handleContentChange();
     };
     reader.readAsDataURL(file);
   };
 
-  // 处理文件选择
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith("image/")) {
@@ -210,7 +214,44 @@ function Note({ noteId }: NoteProps) {
     e.target.value = "";
   };
 
-  // 隐藏便签（保留数据）
+  // 右键菜单
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setContextMenuPos({ x: e.clientX, y: e.clientY });
+    setShowContextMenu(true);
+  };
+
+  useEffect(() => {
+    const handleClick = () => setShowContextMenu(false);
+    document.addEventListener("click", handleClick);
+    return () => document.removeEventListener("click", handleClick);
+  }, []);
+
+  // 切换置顶
+  const handleToggleAlwaysOnTop = async () => {
+    try {
+      const newState = await invoke<boolean>("toggle_always_on_top", { id: noteId });
+      setAlwaysOnTop(newState);
+    } catch (e) {
+      console.error("切换置顶失败:", e);
+    }
+    setShowContextMenu(false);
+  };
+
+  // 更新透明度
+  const handleOpacityChange = (newOpacity: number) => {
+    setOpacity(newOpacity);
+    
+    if (opacityTimeoutRef.current) clearTimeout(opacityTimeoutRef.current);
+    opacityTimeoutRef.current = setTimeout(async () => {
+      try {
+        await invoke("update_note_opacity", { id: noteId, opacity: newOpacity });
+      } catch (e) {
+        console.error("保存透明度失败:", e);
+      }
+    }, 200);
+  };
+
   const handleHide = async () => {
     try {
       await invoke("hide_note", { id: noteId });
@@ -219,7 +260,6 @@ function Note({ noteId }: NoteProps) {
     }
   };
 
-  // 删除便签（永久删除）
   const handleDelete = async () => {
     if (confirm("确定要永久删除这个便签吗？\n\n删除后无法恢复！")) {
       try {
@@ -230,23 +270,27 @@ function Note({ noteId }: NoteProps) {
     }
   };
 
-  // 切换颜色
   const cycleTheme = () => {
     setThemeIndex((prev) => (prev + 1) % NOTE_THEMES.length);
   };
 
+  // 计算实际的背景透明度
+  const bgOpacity = (100 - opacity) / 100;
+  const bgColor = theme.bg;
+  const headerColor = theme.header;
+
   return (
     <div
       className="note-container"
-      style={
-        {
-          "--note-bg": theme.bg,
-          "--note-header": theme.header,
-          "--note-text": theme.text,
-        } as React.CSSProperties
-      }
+      onContextMenu={handleContextMenu}
+      style={{
+        "--note-bg": bgColor,
+        "--note-header": headerColor,
+        "--note-text": theme.text,
+        "--note-opacity": bgOpacity,
+      } as React.CSSProperties}
     >
-      {/* 极简拖拽把手 */}
+      {/* 顶部拖拽把手 */}
       <div className="note-header" data-tauri-drag-region>
         <div className="drag-indicator" data-tauri-drag-region>
           <span data-tauri-drag-region></span>
@@ -254,9 +298,35 @@ function Note({ noteId }: NoteProps) {
           <span data-tauri-drag-region></span>
         </div>
 
+        {/* 置顶状态指示 */}
+        {!alwaysOnTop && <span className="pin-indicator">📌</span>}
+
         {/* 工具栏 */}
         <div className="note-toolbar">
-          {/* 添加图片按钮 */}
+          {/* 透明度调节 */}
+          <div className="opacity-control">
+            <button
+              className="toolbar-btn"
+              onClick={() => setShowOpacitySlider(!showOpacitySlider)}
+              title={`透明度: ${opacity}%`}
+            >
+              💧
+            </button>
+            {showOpacitySlider && (
+              <div className="opacity-slider-popup">
+                <input
+                  type="range"
+                  min="0"
+                  max="90"
+                  value={opacity}
+                  onChange={(e) => handleOpacityChange(Number(e.target.value))}
+                  className="opacity-slider"
+                />
+                <span className="opacity-value">{opacity}%</span>
+              </div>
+            )}
+          </div>
+
           <button
             className="toolbar-btn"
             onClick={() => fileInputRef.current?.click()}
@@ -265,32 +335,20 @@ function Note({ noteId }: NoteProps) {
             🖼️
           </button>
 
-          {/* 颜色选择 */}
           <button className="toolbar-btn" onClick={cycleTheme} title="切换颜色">
             🎨
           </button>
 
-          {/* 隐藏便签（保留数据） */}
-          <button
-            className="toolbar-btn hide-btn"
-            onClick={handleHide}
-            title="隐藏便签"
-          >
+          <button className="toolbar-btn hide-btn" onClick={handleHide} title="隐藏便签">
             −
           </button>
 
-          {/* 删除便签（永久删除） */}
-          <button
-            className="toolbar-btn delete-btn"
-            onClick={handleDelete}
-            title="删除便签"
-          >
+          <button className="toolbar-btn delete-btn" onClick={handleDelete} title="删除便签">
             🗑️
           </button>
         </div>
       </div>
 
-      {/* 隐藏的文件输入 */}
       <input
         ref={fileInputRef}
         type="file"
@@ -299,7 +357,6 @@ function Note({ noteId }: NoteProps) {
         onChange={handleFileSelect}
       />
 
-      {/* 可编辑内容区域 */}
       <div
         ref={contentRef}
         className="note-content"
@@ -311,8 +368,29 @@ function Note({ noteId }: NoteProps) {
         suppressContentEditableWarning
       />
 
-      {/* 调整大小指示器 */}
       <div className="resize-indicator" />
+
+      {/* 右键菜单 */}
+      {showContextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
+        >
+          <button onClick={handleToggleAlwaysOnTop}>
+            {alwaysOnTop ? "📌 取消置顶" : "📍 置顶窗口"}
+          </button>
+          <button onClick={() => { setShowOpacitySlider(true); setShowContextMenu(false); }}>
+            💧 调节透明度
+          </button>
+          <div className="menu-divider" />
+          <button onClick={handleHide}>
+            🔽 隐藏便签
+          </button>
+          <button className="danger" onClick={handleDelete}>
+            🗑️ 删除便签
+          </button>
+        </div>
+      )}
     </div>
   );
 }
