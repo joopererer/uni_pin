@@ -13,127 +13,197 @@ body,
   font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
 }
 
-.sticky-note {
+/* ============ 便签容器 ============ */
+.note-container {
   display: flex;
   flex-direction: column;
   width: 100%;
   height: 100%;
-  background: linear-gradient(135deg, #fff9c4 0%, #fff176 100%);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15), 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: var(--note-bg, #fff9c4);
+  border-radius: 12px;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.12),
+    0 2px 10px rgba(0, 0, 0, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
   overflow: hidden;
-  border: 1px solid rgba(255, 235, 59, 0.3);
+  position: relative;
 }
 
-/* 标题栏 */
-.title-bar {
+/* ============ 顶部拖拽把手 ============ */
+.note-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.1) 100%);
+  height: 32px;
+  padding: 0 8px;
+  background: var(--note-header, #ffee58);
   cursor: move;
   user-select: none;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  flex-shrink: 0;
 }
 
-.title-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: #5d4037;
-  letter-spacing: 0.5px;
-}
-
-.window-controls {
+/* 拖拽指示器 - 三条横线 */
+.drag-indicator {
   display: flex;
-  gap: 6px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 8px;
+  opacity: 0.4;
+  transition: opacity 0.2s;
 }
 
-.control-btn {
+.drag-indicator:hover {
+  opacity: 0.7;
+}
+
+.drag-indicator span {
+  width: 20px;
+  height: 2px;
+  background: var(--note-text, #5d4037);
+  border-radius: 1px;
+}
+
+/* ============ 工具栏 ============ */
+.note-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-btn {
   width: 24px;
   height: 24px;
   border: none;
-  border-radius: 50%;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.3);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
+  font-size: 12px;
+  color: var(--note-text, #5d4037);
+  transition: all 0.15s ease;
+}
+
+.toolbar-btn:hover {
+  background: rgba(255, 255, 255, 0.6);
+  transform: scale(1.1);
+}
+
+.toolbar-btn.minimize-btn {
   font-size: 16px;
   font-weight: bold;
-  transition: all 0.2s ease;
-  line-height: 1;
 }
 
-.control-btn.minimize {
-  background: #81c784;
-  color: white;
+.toolbar-btn.close-btn {
+  font-size: 14px;
+  font-weight: bold;
 }
 
-.control-btn.minimize:hover {
-  background: #66bb6a;
-  transform: scale(1.1);
-}
-
-.control-btn.close {
-  background: #e57373;
-  color: white;
-}
-
-.control-btn.close:hover {
+.toolbar-btn.close-btn:hover {
   background: #ef5350;
-  transform: scale(1.1);
+  color: white;
 }
 
-/* 内容区域 */
+/* ============ 内容编辑区域 ============ */
 .note-content {
   flex: 1;
-  padding: 16px;
-  border: none;
-  background: transparent;
-  resize: none;
+  padding: 12px 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
   font-size: 14px;
-  line-height: 1.6;
-  color: #4e342e;
+  line-height: 1.7;
+  color: var(--note-text, #4e342e);
   outline: none;
+  word-wrap: break-word;
+  white-space: pre-wrap;
 }
 
-.note-content::placeholder {
-  color: #a1887f;
+/* 占位符文字 */
+.note-content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--note-text, #5d4037);
+  opacity: 0.4;
   font-style: italic;
+  pointer-events: none;
 }
 
-/* 调整大小手柄 */
-.resize-handle {
+/* 内容区选中样式 */
+.note-content::selection {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* 图片样式 */
+.note-content img,
+.note-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 8px 0;
+  display: block;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.note-content img:hover,
+.note-image:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* ============ 调整大小指示器 ============ */
+.resize-indicator {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 16px;
-  height: 16px;
-  cursor: se-resize;
-  background: linear-gradient(
-    135deg,
-    transparent 50%,
-    rgba(0, 0, 0, 0.1) 50%,
-    rgba(0, 0, 0, 0.15) 100%
-  );
-  border-radius: 0 0 8px 0;
+  right: 4px;
+  bottom: 4px;
+  width: 12px;
+  height: 12px;
+  opacity: 0.3;
+  background: 
+    linear-gradient(135deg, transparent 30%, var(--note-text, #5d4037) 30%, var(--note-text, #5d4037) 40%, transparent 40%),
+    linear-gradient(135deg, transparent 55%, var(--note-text, #5d4037) 55%, var(--note-text, #5d4037) 65%, transparent 65%),
+    linear-gradient(135deg, transparent 80%, var(--note-text, #5d4037) 80%);
+  pointer-events: none;
 }
 
-/* 滚动条样式 */
+/* ============ 滚动条样式 ============ */
 .note-content::-webkit-scrollbar {
   width: 6px;
 }
 
 .note-content::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.05);
-  border-radius: 3px;
+  background: transparent;
+  margin: 4px;
 }
 
 .note-content::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--note-text, #5d4037);
+  opacity: 0.2;
   border-radius: 3px;
 }
 
 .note-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
+  opacity: 0.4;
+}
+
+/* ============ 链接样式 ============ */
+.note-content a {
+  color: var(--note-text, #5d4037);
+  text-decoration: underline;
+}
+
+/* ============ 动画效果 ============ */
+@keyframes noteAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.note-container {
+  animation: noteAppear 0.2s ease-out;
 }
