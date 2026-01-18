@@ -29,6 +29,7 @@ interface NoteData {
 const APP_VERSION = "0.1.0";
 
 function Manager() {
+  const { t, tWith, language, changeLanguage } = useI18n();
   const [notes, setNotes] = useState<NoteData[]>([]);
   const [autoStart, setAutoStart] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -324,7 +325,7 @@ function Manager() {
       .replace(/<img[^>]*>/g, "[图片]")
       .replace(/<[^>]+>/g, "")
       .trim();
-    return text || "空便签";
+    return text || t("manager.emptyNote") || "空便签";
   };
 
   // 格式化时间
@@ -356,33 +357,44 @@ function Manager() {
         <div className="manager-header">
           <h1>
             <span>📋</span>
-            UniStick 管理中心
+            {t("manager.title")}
           </h1>
           <div className="manager-actions">
             <button className="manager-btn secondary" onClick={handleShowAll}>
-              👁️ 显示全部
+              👁️ {t("manager.showAll")}
             </button>
             <button className="manager-btn secondary" onClick={handleHideAll}>
-              🔽 隐藏全部
+              🔽 {t("manager.hideAll")}
             </button>
             <button className="manager-btn primary" onClick={handleCreateNote}>
-              ➕ 新建便签
+              ➕ {t("manager.newNote")}
             </button>
             <button className="manager-btn secondary" onClick={() => setShowAbout(true)}>
-              ℹ️ 关于
+              ℹ️ {t("manager.about")}
             </button>
           </div>
         </div>
 
         {/* 设置面板 */}
         <div className="settings-panel">
-          <h3>⚙️ 设置</h3>
+          <h3>⚙️ {t("manager.languageSetting")}</h3>
           <div className="setting-item">
-            <span className="setting-label">开机自动启动</span>
+            <span className="setting-label">{t("manager.autoStart")}</span>
             <div
               className={`toggle-switch ${autoStart ? "active" : ""}`}
               onClick={handleToggleAutoStart}
             />
+          </div>
+          <div className="setting-item">
+            <span className="setting-label">{t("manager.language")}</span>
+            <select
+              className="language-select"
+              value={language}
+              onChange={(e) => changeLanguage(e.target.value as "zh" | "en")}
+            >
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
           </div>
         </div>
 
@@ -393,7 +405,7 @@ function Manager() {
             <input
               type="text"
               className="search-input"
-              placeholder="搜索便签内容..."
+              placeholder={t("manager.searchPlaceholder")}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -407,36 +419,36 @@ function Manager() {
             className={`manager-btn ${selectMode ? 'primary' : 'secondary'}`}
             onClick={toggleSelectMode}
           >
-            {selectMode ? '✓ 完成选择' : '☐ 多选管理'}
+            {selectMode ? `✓ ${t("manager.finishSelection")}` : `☐ ${t("manager.selectMode")}`}
           </button>
         </div>
 
         {/* 多选操作栏 */}
         {selectMode && (
           <div className="batch-actions">
-            <span className="selected-count">已选择 {selectedIds.size} 项</span>
-            <button className="batch-btn" onClick={selectAll}>全选</button>
-            <button className="batch-btn" onClick={deselectAll}>取消全选</button>
+            <span className="selected-count">{tWith("manager.selectedCount", { count: selectedIds.size })}</span>
+            <button className="batch-btn" onClick={selectAll}>{t("manager.selectAll")}</button>
+            <button className="batch-btn" onClick={deselectAll}>{t("manager.deselectAll")}</button>
             <button 
               className="batch-btn" 
               onClick={handleBatchShow}
               disabled={selectedIds.size === 0}
             >
-              👁️ 批量显示
+              👁️ {t("manager.batchShow")}
             </button>
             <button 
               className="batch-btn" 
               onClick={handleBatchHide}
               disabled={selectedIds.size === 0}
             >
-              🔽 批量隐藏
+              🔽 {t("manager.batchHide")}
             </button>
             <button 
               className="batch-btn danger" 
               onClick={handleBatchDelete}
               disabled={selectedIds.size === 0}
             >
-              🗑️ 批量删除
+              🗑️ {t("manager.batchDelete")}
             </button>
           </div>
         )}
@@ -445,10 +457,10 @@ function Manager() {
         {filteredNotes.length === 0 ? (
           <div className="empty-state">
             <span>{searchTerm ? "🔍" : "📝"}</span>
-            <p>{searchTerm ? `没有找到包含 "${searchTerm}" 的便签` : "还没有便签，点击上方按钮创建一个吧！"}</p>
+            <p>{searchTerm ? tWith("manager.emptySearch", { term: searchTerm }) : t("manager.emptyState")}</p>
             {!searchTerm && (
               <button className="manager-btn primary" onClick={handleCreateNote}>
-                ➕ 新建便签
+                ➕ {t("manager.newNote")}
               </button>
             )}
           </div>
@@ -481,7 +493,7 @@ function Manager() {
                     <span
                       className={`note-card-status ${visible ? "" : "hidden"}`}
                     >
-                      {visible ? "显示中" : "已隐藏"}
+                      {visible ? t("manager.visible") : t("manager.hidden")}
                     </span>
                   </div>
                   <div className="note-card-content">
@@ -539,8 +551,8 @@ function Manager() {
       {/* 删除确认对话框 */}
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="删除便签"
-        message="确定要删除这个便签吗？\n\n删除后无法恢复！"
+        title={t("confirm.deleteNote")}
+        message={t("confirm.deleteNoteWarning")}
         onConfirm={confirmDeleteNote}
         onCancel={() => {
           setShowDeleteConfirm(false);
@@ -554,12 +566,12 @@ function Manager() {
       {/* 批量删除确认对话框 */}
       <ConfirmDialog
         open={showBatchDeleteConfirm}
-        title="批量删除"
-        message={`确定要删除选中的 ${selectedIds.size} 个便签吗？\n\n删除后无法恢复！`}
+        title={t("confirm.batchDelete")}
+        message={tWith("confirm.batchDeleteWarning", { count: selectedIds.size })}
         onConfirm={confirmBatchDelete}
         onCancel={() => setShowBatchDeleteConfirm(false)}
-        confirmText="删除"
-        cancelText="取消"
+        confirmText={t("common.delete")}
+        cancelText={t("common.cancel")}
         danger={true}
       />
 
@@ -580,11 +592,11 @@ function Manager() {
               setShowUpdate(true);
               setShowAbout(false);
             } else {
-              alert("已是最新版本！");
+              alert(t("update.latest"));
             }
           } catch (e) {
             console.error("检查更新失败:", e);
-            alert("检查更新失败，请稍后重试");
+            alert(t("update.checkFailed"));
           }
         }}
       />

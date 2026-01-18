@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { open } from "@tauri-apps/plugin-shell";
+import { useI18n } from "../hooks/useI18n";
 
 interface UpdateDialogProps {
   open: boolean;
@@ -16,6 +17,7 @@ export default function UpdateDialog({
   releaseNotes,
   onClose,
 }: UpdateDialogProps) {
+  const { t, tWith } = useI18n();
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape" && openDialog) {
@@ -49,23 +51,23 @@ export default function UpdateDialog({
     <div className="update-dialog-overlay" onClick={onClose}>
       <div className="update-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="update-dialog-header">
-          <h2>🆕 发现新版本</h2>
+          <h2>🆕 {t("update.title")}</h2>
           <button className="update-dialog-close" onClick={onClose}>×</button>
         </div>
         <div className="update-dialog-content">
-          <p className="update-version">版本 {version}</p>
+          <p className="update-version">{tWith("update.version", { version })}</p>
           {releaseNotes && (
             <div className="update-notes">
-              <h3>更新内容：</h3>
+              <h3>{t("update.releaseNotes")}</h3>
               <div dangerouslySetInnerHTML={{ __html: releaseNotes }} />
             </div>
           )}
           <div className="update-dialog-actions">
             <button className="update-btn secondary" onClick={onClose}>
-              稍后提醒
+              {t("update.later")}
             </button>
             <button className="update-btn primary" onClick={handleDownload}>
-              立即下载
+              {t("update.download")}
             </button>
           </div>
         </div>

@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-shell";
+import { useI18n } from "../hooks/useI18n";
 
 interface AboutDialogProps {
   open: boolean;
@@ -8,9 +9,10 @@ interface AboutDialogProps {
 }
 
 export default function AboutDialog({ open: openDialog, onClose, version, onCheckUpdate: _onCheckUpdate }: AboutDialogProps) {
+  const { t } = useI18n();
   const handleFeedback = async () => {
     try {
-      const mailto = "mailto:joopererer@gmail.com?subject=UniStick%20反馈&body=请在此输入您的反馈意见...";
+      const mailto = `mailto:joopererer@gmail.com?subject=UniPin%20${encodeURIComponent(t("about.feedback"))}&body=请在此输入您的反馈意见...`;
       await open(mailto);
     } catch (e) {
       console.error("打开邮件客户端失败:", e);
@@ -30,19 +32,17 @@ export default function AboutDialog({ open: openDialog, onClose, version, onChec
     <div className="about-dialog-overlay" onClick={onClose}>
       <div className="about-dialog" onClick={(e) => e.stopPropagation()}>
         <div className="about-dialog-header">
-          <h2>📝 UniStick</h2>
+          <h2>📝 {t("about.title")}</h2>
           <button className="about-dialog-close" onClick={onClose}>×</button>
         </div>
         <div className="about-dialog-content">
           <div className="about-dialog-section">
-            <h3>版本</h3>
+            <h3>{t("about.version")}</h3>
             <p>{version}</p>
           </div>
           <div className="about-dialog-section">
-            <h3>简介</h3>
-            <p>
-              UniStick 是一款轻量级的桌面便签应用，支持多便签管理、图片插入、颜色主题、透明度调节等功能。
-            </p>
+            <h3>{t("about.intro")}</h3>
+            <p>{t("about.description")}</p>
           </div>
           <div className="about-dialog-section">
             <h3>主要功能</h3>
@@ -57,21 +57,21 @@ export default function AboutDialog({ open: openDialog, onClose, version, onChec
             </ul>
           </div>
           <div className="about-dialog-section">
-            <h3>快捷键</h3>
-            <p>Alt + N: 快速创建新便签</p>
+            <h3>{t("about.shortcuts")}</h3>
+            <p>Alt + N: {t("tray.newNote")}</p>
           </div>
           <div className="about-dialog-section">
             <button className="about-feedback-btn" onClick={handleFeedback}>
-              💬 反馈建议
+              💬 {t("about.feedback")}
             </button>
             {_onCheckUpdate && (
               <button className="about-feedback-btn" onClick={_onCheckUpdate} style={{ marginTop: "8px" }}>
-                🔄 检查更新
+                🔄 {t("about.checkUpdate")}
               </button>
             )}
           </div>
           <div className="about-dialog-footer">
-            <p>© 2026 UniStick 保留所有权利</p>
+            <p>{t("about.copyright")}</p>
           </div>
         </div>
       </div>

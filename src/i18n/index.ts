@@ -9,8 +9,9 @@ export interface Translations {
     delete: string;
     save: string;
     close: string;
-    yes: string;
-    no: string;
+      yes: string;
+      no: string;
+      loading: string;
   };
   // 管理中心
   manager: {
@@ -28,10 +29,11 @@ export interface Translations {
     batchHide: string;
     batchDelete: string;
     selectedCount: string;
-    visible: string;
-    hidden: string;
-    emptyState: string;
-    emptySearch: string;
+      visible: string;
+      hidden: string;
+      emptyNote: string;
+      emptyState: string;
+      emptySearch: string;
     autoStart: string;
     language: string;
     languageSetting: string;
@@ -59,6 +61,7 @@ export interface Translations {
     title: string;
     version: string;
     description: string;
+    intro: string;
     features: string;
     shortcuts: string;
     feedback: string;
@@ -104,6 +107,7 @@ const translations: Record<Language, Translations> = {
       close: '关闭',
       yes: '是',
       no: '否',
+      loading: '加载中...',
     },
     manager: {
       title: 'UniPin 管理中心',
@@ -122,6 +126,7 @@ const translations: Record<Language, Translations> = {
       selectedCount: '已选择 {count} 项',
       visible: '显示中',
       hidden: '已隐藏',
+      emptyNote: '空便签',
       emptyState: '还没有便签，点击上方按钮创建一个吧！',
       emptySearch: '没有找到包含 "{term}" 的便签',
       autoStart: '开机自动启动',
@@ -149,6 +154,7 @@ const translations: Record<Language, Translations> = {
       title: 'UniPin',
       version: '版本',
       description: 'UniPin 是一款轻量级的桌面便签应用，支持多便签管理、图片插入、颜色主题、透明度调节等功能。',
+      intro: '简介',
       features: '主要功能',
       shortcuts: '快捷键',
       feedback: '反馈建议',
@@ -189,6 +195,7 @@ const translations: Record<Language, Translations> = {
       close: 'Close',
       yes: 'Yes',
       no: 'No',
+      loading: 'Loading...',
     },
     manager: {
       title: 'UniPin Management Center',
@@ -207,6 +214,7 @@ const translations: Record<Language, Translations> = {
       selectedCount: '{count} selected',
       visible: 'Visible',
       hidden: 'Hidden',
+      emptyNote: 'Empty Note',
       emptyState: 'No notes yet, click the button above to create one!',
       emptySearch: 'No notes found containing "{term}"',
       autoStart: 'Start with system',
@@ -234,6 +242,7 @@ const translations: Record<Language, Translations> = {
       title: 'UniPin',
       version: 'Version',
       description: 'UniPin is a lightweight desktop sticky notes application that supports multi-note management, image insertion, color themes, opacity adjustment, and more.',
+      intro: 'Introduction',
       features: 'Features',
       shortcuts: 'Shortcuts',
       feedback: 'Feedback',
@@ -294,11 +303,8 @@ export function t(key: string): string {
   }
   
   if (typeof value === 'string') {
-    // 简单的模板替换
-    return value.replace(/\{(\w+)\}/g, (match, name) => {
-      // 可以从参数中获取，暂时返回占位符
-      return match;
-    });
+    // Template replacement is handled by tWithParams
+    return value;
   }
   
   return typeof value === 'string' ? value : key;
@@ -312,4 +318,4 @@ export function tWithParams(key: string, params: Record<string, string | number>
   return text;
 }
 
-export { translations, type Language };
+export { translations };

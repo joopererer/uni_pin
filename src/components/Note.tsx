@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import ConfirmDialog from "./ConfirmDialog";
+import { useI18n } from "../hooks/useI18n";
 
 // 预定义的便签颜色主题
 const NOTE_THEMES = [
@@ -29,6 +30,7 @@ interface NoteProps {
 }
 
 function Note({ noteId }: NoteProps) {
+  const { t } = useI18n();
   const [themeIndex, setThemeIndex] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   const [opacity, setOpacity] = useState(0);
@@ -371,7 +373,7 @@ function Note({ noteId }: NoteProps) {
             <button
               className="toolbar-btn"
               onClick={() => fileInputRef.current?.click()}
-              title="添加图片"
+              title={t("note.addImage")}
             >
               🖼️
             </button>
@@ -385,7 +387,7 @@ function Note({ noteId }: NoteProps) {
               <button
                 className="toolbar-btn"
                 onClick={() => setShowOpacitySlider(!showOpacitySlider)}
-                title={`透明度: ${opacity}%`}
+                title={`${t("note.opacity")}: ${opacity}%`}
               >
                 💧
               </button>
@@ -430,7 +432,7 @@ function Note({ noteId }: NoteProps) {
           onInput={handleContentChange}
           onFocus={handleContentFocus}
           onBlur={handleContentBlur}
-          data-placeholder="输入便签内容... 支持 Ctrl+V 粘贴图片"
+          data-placeholder={t("note.placeholder")}
           suppressContentEditableWarning
         />
 
@@ -462,12 +464,12 @@ function Note({ noteId }: NoteProps) {
       {/* 删除确认对话框 */}
       <ConfirmDialog
         open={showDeleteConfirm}
-        title="删除便签"
-        message="确定要永久删除这个便签吗？\n\n删除后无法恢复！"
+              title={t("confirm.deleteNote")}
+        message={t("confirm.deleteNoteWarning")}
         onConfirm={confirmDelete}
         onCancel={() => setShowDeleteConfirm(false)}
-        confirmText="删除"
-        cancelText="取消"
+            confirmText={t("common.delete")}
+            cancelText={t("common.cancel")}
         danger={true}
       />
     </>

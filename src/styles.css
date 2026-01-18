@@ -432,6 +432,31 @@ body,
   font-size: 14px;
 }
 
+.language-select {
+  padding: 6px 12px;
+  border: none;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.language-select:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.language-select:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.language-select option {
+  background: #667eea;
+  color: white;
+}
+
 /* Toggle 开关 */
 .toggle-switch {
   position: relative;
