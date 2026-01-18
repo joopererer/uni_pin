@@ -4,9 +4,10 @@ interface AboutDialogProps {
   open: boolean;
   onClose: () => void;
   version: string;
+  onCheckUpdate?: () => void;
 }
 
-export default function AboutDialog({ open: openDialog, onClose, version }: AboutDialogProps) {
+export default function AboutDialog({ open: openDialog, onClose, version, onCheckUpdate }: AboutDialogProps) {
   const handleFeedback = async () => {
     try {
       const mailto = "mailto:joopererer@gmail.com?subject=UniStick%20反馈&body=请在此输入您的反馈意见...";

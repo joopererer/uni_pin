@@ -52,6 +52,70 @@ npm run tauri build
 
 构建产物位于 `src-tauri/target/release/bundle/`
 
+## 🔄 自动更新
+
+应用会自动检查更新（启动 5 秒后后台检查）：
+- 从 GitHub Releases 检查最新版本
+- 发现新版本时会在管理中心显示更新提示
+- 也可以在"关于"对话框中手动检查更新
+
+## 🚢 CI/CD
+
+项目配置了 GitHub Actions 自动构建和发布：
+
+- **测试工作流** (`.github/workflows/test.yml`):
+  - 在推送到 `master` 或 `dev` 分支时自动运行
+  - 运行 Rust 单元测试
+  - 运行前端 TypeScript 类型检查
+
+- **发布工作流** (`.github/workflows/release.yml`):
+  - 在推送到 `master` 分支或创建新 tag (`v*`) 时自动构建
+  - 目前支持 Windows 平台
+  - Mac 和 Linux 支持已配置但暂时禁用（等有对应开发者时启用）
+  - 自动创建 GitHub Release 并上传安装包
+
+### 手动触发发布
+
+1. 更新版本号：
+   - `package.json`: `version`
+   - `src-tauri/Cargo.toml`: `version`
+   - `src-tauri/tauri.conf.json`: `version`
+
+2. 创建 Git tag:
+   ```bash
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+3. GitHub Actions 会自动构建并创建 Release（Draft 状态）
+
+4. 编辑 Release 说明后发布
+
+## 🧪 测试
+
+### Rust 测试
+
+```bash
+cd src-tauri
+cargo test
+```
+
+### 前端测试
+
+```bash
+npm test              # 运行测试
+npm run test:ui       # 运行测试 UI
+npm run test:coverage # 生成覆盖率报告
+```
+
+## 📊 Firebase 集成
+
+目前**未集成 Firebase**，原因请参考 [`.github/FIREBASE.md`](.github/FIREBASE.md)。
+
+如果未来需要，可以考虑：
+- 可选的匿名使用统计（需用户明确同意）
+- 崩溃报告（仅在用户允许时收集）
+
 ## 📖 使用说明
 
 ### 基本操作

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import ConfirmDialog from "./ConfirmDialog";
 import AboutDialog from "./AboutDialog";
+import UpdateDialog from "./UpdateDialog";
 
 const NOTE_THEMES = [
   { name: "yellow", bg: "#fff9c4", header: "#ffee58" },
@@ -75,6 +76,20 @@ function Manager() {
     };
     window.addEventListener("showAbout", handleShowAbout);
     
+    // 监听更新可用事件
+    const handleUpdateAvailable = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail && detail.version && detail.url) {
+        setUpdateInfo({
+          version: detail.version,
+          url: detail.url,
+          notes: detail.notes,
+        });
+        setShowUpdate(true);
+      }
+    };
+    window.addEventListener("updateAvailable", handleUpdateAvailable);
+    
     // 暴露全局方法供 Rust 调用
     (window as any).showAboutDialog = () => {
       setShowAbout(true);
@@ -83,6 +98,7 @@ function Manager() {
     return () => {
       clearInterval(interval);
       window.removeEventListener("showAbout", handleShowAbout);
+      window.removeEventListener("updateAvailable", handleUpdateAvailable);
       delete (window as any).showAboutDialog;
     };
   }, [loadNotes, loadSettings]);
@@ -544,7 +560,33 @@ function Manager() {
         open={showAbout}
         onClose={() => setShowAbout(false)}
         version={APP_VERSION}
+        onCheckUpdate={async () => {
+          try {
+            const result = await invoke<{ version: string; downloadUrl: string; notes?: string } | null>("check_update");
+            if (result) {
+              setUpdateInfo(result);
+              setShowUpdate(true);
+              setShowAbout(false);
+            } else {
+              alert("已是最新版本！");
+            }
+          } catch (e) {
+            console.error("检查更新失败:", e);
+            alert("检查更新失败，请稍后重试");
+          }
+        }}
       />
+
+      {/* 更新提示对话框 */}
+      {updateInfo && (
+        <UpdateDialog
+          open={showUpdate}
+          version={updateInfo.version}
+          downloadUrl={updateInfo.url}
+          releaseNotes={updateInfo.notes}
+          onClose={() => setShowUpdate(false)}
+        />
+      )}
     </>
   );
 }

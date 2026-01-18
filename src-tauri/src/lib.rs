@@ -1,6 +1,8 @@
 mod note_store;
+mod updater;
 
 use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir};
+use updater::{check_for_updates, GitHubRelease};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -371,6 +373,12 @@ fn get_auto_start(state: State<'_, NoteStoreState>) -> bool {
     store.settings.auto_start
 }
 
+/// 检查更新
+#[tauri::command]
+async fn check_update() -> Result<Option<GitHubRelease>, String> {
+    check_for_updates().await
+}
+
 /// 设置自启动
 #[tauri::command]
 fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
@@ -582,12 +590,47 @@ pub fn run() {
             get_all_note_windows,
             save_image,
             get_auto_start,
-            set_auto_start
+            set_auto_start,
+            check_update
         ])
         .setup(|app| {
             restore_saved_notes(app.handle())?;
             setup_tray(app.handle())?;
             setup_global_shortcuts(app.handle())?;
+            
+            // 后台检查更新（非阻塞）
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                // 使用 tokio runtime 执行异步任务
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    // 延迟 5 秒后检查更新，避免影响启动速度
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    match check_for_updates().await {
+                        Ok(Some(release)) => {
+                            println!("🆕 发现新版本: {}", release.tag_name);
+                            // 可以发送事件到前端显示更新提示
+                            if let Some(window) = app_handle.get_webview_window("manager") {
+                                let download_url = release.assets.first()
+                                    .map(|a| a.browser_download_url.clone())
+                                    .unwrap_or_default();
+                                let _ = window.eval(&format!(
+                                    "window.dispatchEvent(new CustomEvent('updateAvailable', {{ detail: {{ version: '{}', url: '{}', notes: '{}' }} }}));",
+                                    release.tag_name,
+                                    download_url,
+                                    release.body.replace('\'', "\\'").replace('\n', "\\n")
+                                ));
+                            }
+                        }
+                        Ok(None) => {
+                            println!("✅ 已是最新版本");
+                        }
+                        Err(e) => {
+                            println!("⚠️ 检查更新失败: {}", e);
+                        }
+                    }
+                });
+            });
             
             println!("✨ UniStick 已启动！");
             Ok(())
