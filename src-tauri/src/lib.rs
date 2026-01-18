@@ -1,8 +1,10 @@
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager, WebviewUrl, WebviewWindowBuilder,
 };
+use image::GenericImageView;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 use uuid::Uuid;
 
@@ -97,8 +99,16 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = Menu::with_items(app, &[&new_note, &show_all, &hide_all, &quit])?;
 
-    // 构建托盘图标 - 使用默认图标
+    // 从嵌入的 PNG 文件加载图标并转换为 RGBA
+    let png_bytes = include_bytes!("../icons/32x32.png");
+    let img = image::load_from_memory(png_bytes).expect("Failed to load icon");
+    let (width, height) = img.dimensions();
+    let rgba = img.into_rgba8().into_raw();
+    let icon = Image::new_owned(rgba, width, height);
+
+    // 构建托盘图标
     let _tray = TrayIconBuilder::new()
+        .icon(icon)
         .menu(&menu)
         .tooltip("便签应用 - Alt+N 创建新便签")
         .show_menu_on_left_click(false)
@@ -119,6 +129,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
+    println!("🔔 系统托盘已设置");
     Ok(())
 }
 
