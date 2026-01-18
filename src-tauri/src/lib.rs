@@ -375,50 +375,98 @@ fn get_auto_start(state: State<'_, NoteStoreState>) -> bool {
 
 /// 检查更新
 #[tauri::command]
-async fn check_update() -> Result<Option<GitHubRelease>, String> {
-    check_for_updates().await
+async fn check_update() -> Result<Option<serde_json::Value>, String> {
+    match check_for_updates().await {
+        Ok(Some(release)) => {
+            // 转换为前端期望的格式
+            let download_url = release.assets.first()
+                .map(|a| a.browser_download_url.clone())
+                .unwrap_or_default();
+            
+            Ok(Some(serde_json::json!({
+                "version": release.tag_name,
+                "downloadUrl": download_url,
+                "notes": release.body
+            })))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// 设置自启动
 #[tauri::command]
 fn set_auto_start(state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
-    // 更新存储
+    // 先更新存储
     {
         let mut store = state.0.lock().unwrap();
         store.settings.auto_start = enabled;
         save_notes(&store)?;
     }
     
-    // 配置 Windows 自启动
+    // 配置 Windows 自启动（在后台线程执行，避免阻塞）
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        let exe_path = std::env::current_exe()
-            .map_err(|e| format!("获取程序路径失败: {}", e))?;
+        use std::time::Duration;
         
-        if enabled {
-            // 添加到注册表
-            let _ = Command::new("reg")
-                .args([
-                    "add",
-                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                    "/v", "StickyNotes",
-                    "/t", "REG_SZ",
-                    "/d", &exe_path.to_string_lossy(),
-                    "/f"
-                ])
-                .output();
-        } else {
-            // 从注册表移除
-            let _ = Command::new("reg")
-                .args([
-                    "delete",
-                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                    "/v", "StickyNotes",
-                    "/f"
-                ])
-                .output();
-        }
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("获取程序路径失败: {}", e))?
+            .to_string_lossy()
+            .to_string();
+        
+        // 在后台线程执行注册表操作
+        std::thread::spawn(move || {
+            if enabled {
+                // 添加到注册表
+                let output = Command::new("reg")
+                    .args([
+                        "add",
+                        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                        "/v", "UniStick", // 更新为 UniStick
+                        "/t", "REG_SZ",
+                        "/d", &exe_path,
+                        "/f"
+                    ])
+                    .output();
+                
+                if let Err(e) = output {
+                    eprintln!("❌ 添加自启动失败: {}", e);
+                } else if let Ok(out) = output {
+                    if !out.status.success() {
+                        eprintln!("❌ 添加自启动失败: {}", String::from_utf8_lossy(&out.stderr));
+                    } else {
+                        println!("✅ 已添加自启动");
+                    }
+                }
+            } else {
+                // 从注册表移除
+                let output = Command::new("reg")
+                    .args([
+                        "delete",
+                        r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                        "/v", "UniStick", // 更新为 UniStick
+                        "/f"
+                    ])
+                    .output();
+                
+                if let Err(e) = output {
+                    eprintln!("❌ 移除自启动失败: {}", e);
+                } else if let Ok(out) = output {
+                    if !out.status.success() {
+                        // 如果注册表项不存在，也认为是成功（可能是已经删除）
+                        let stderr = String::from_utf8_lossy(&out.stderr);
+                        if !stderr.contains("ERROR") || stderr.contains("not found") {
+                            println!("✅ 已移除自启动");
+                        } else {
+                            eprintln!("❌ 移除自启动失败: {}", stderr);
+                        }
+                    } else {
+                        println!("✅ 已移除自启动");
+                    }
+                }
+            }
+        });
     }
     
     Ok(())

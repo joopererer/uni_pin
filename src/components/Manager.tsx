@@ -195,12 +195,17 @@ function Manager() {
 
   // 切换自启动
   const handleToggleAutoStart = async () => {
+    const newValue = !autoStart;
+    // 先更新 UI（乐观更新）
+    setAutoStart(newValue);
     try {
-      const newValue = !autoStart;
       await invoke("set_auto_start", { enabled: newValue });
-      setAutoStart(newValue);
+      // 注册表操作在后台执行，这里不等待完成
     } catch (e) {
       console.error("设置自启动失败:", e);
+      // 如果失败，回滚 UI 状态
+      setAutoStart(autoStart);
+      alert("设置自启动失败，请稍后重试");
     }
   };
 

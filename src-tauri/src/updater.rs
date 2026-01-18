@@ -29,16 +29,38 @@ pub async fn check_for_updates() -> Result<Option<GitHubRelease>, String> {
 
     let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
     
-    let client = reqwest::Client::new();
+    // 创建带超时的客户端
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10)) // 10 秒超时
+        .build()
+        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
+    
     let response = client
         .get(&url)
         .header("User-Agent", "UniStick-Updater")
+        .header("Accept", "application/vnd.github.v3+json")
         .send()
         .await
-        .map_err(|e| format!("网络请求失败: {}", e))?;
+        .map_err(|e| {
+            // 提供更友好的错误信息
+            if e.is_timeout() {
+                "网络请求超时，请检查网络连接".to_string()
+            } else if e.is_connect() {
+                "无法连接到服务器，请检查网络连接".to_string()
+            } else {
+                format!("网络请求失败: {}", e)
+            }
+        })?;
 
-    if !response.status().is_success() {
-        return Err(format!("获取更新信息失败: {}", response.status()));
+    let status = response.status();
+    if !status.is_success() {
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err("仓库未找到或尚未发布版本".to_string());
+        } else if status == reqwest::StatusCode::FORBIDDEN {
+            return Err("访问被拒绝，请稍后重试".to_string());
+        } else {
+            return Err(format!("获取更新信息失败: HTTP {}", status.as_u16()));
+        }
     }
 
     let release: GitHubRelease = response
