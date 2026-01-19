@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import StickyNote from "./components/StickyNote";
+import Note from "./components/Note";
 
 function App() {
   const [noteId, setNoteId] = useState<string | null>(null);
@@ -11,23 +11,11 @@ function App() {
     setNoteId(window.label);
   }, []);
 
-  const handleClose = async () => {
-    const window = getCurrentWindow();
-    await window.close();
-  };
+  if (!noteId) {
+    return null; // 等待获取窗口 ID
+  }
 
-  const handleMinimize = async () => {
-    const window = getCurrentWindow();
-    await window.minimize();
-  };
-
-  return (
-    <StickyNote
-      noteId={noteId || "note"}
-      onClose={handleClose}
-      onMinimize={handleMinimize}
-    />
-  );
+  return <Note noteId={noteId} />;
 }
 
 export default App;
