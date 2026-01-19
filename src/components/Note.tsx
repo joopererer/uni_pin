@@ -92,39 +92,92 @@ function Note({ noteId }: NoteProps) {
   }, [isLoaded]);
 
   // 修复已保存图片的路径并绑定点击事件
-  const fixSavedImages = useCallback(() => {
+  const fixSavedImages = useCallback(async () => {
     if (!contentRef.current) return;
     
     const images = contentRef.current.querySelectorAll('img');
-    images.forEach((img) => {
+    
+    for (const img of Array.from(images)) {
       // 检查图片路径是否需要转换
       const src = img.src;
       const dataPath = img.getAttribute("data-image-path");
+      const useBlob = img.getAttribute("data-use-blob") === "true";
+      
+      // 辅助函数：从文件路径创建 Blob URL
+      const createBlobUrlFromPath = async (filePath: string): Promise<string | null> => {
+        try {
+          console.log(`[修复图片] 从文件路径创建 Blob URL: ${filePath}`);
+          
+          // 先尝试使用 convertFileSrc 获取 URL
+          const normalizedPath = filePath.replace(/\\/g, '/');
+          const convertedUrl = convertFileSrc(normalizedPath);
+          console.log(`[修复图片] convertFileSrc 返回: ${convertedUrl}`);
+          
+          // 如果返回 asset.localhost，直接使用 Tauri 命令读取文件
+          // 因为在开发模式下 asset.localhost 可能无法工作
+          if (convertedUrl.includes('asset.localhost')) {
+            console.log(`[修复图片] 检测到 asset.localhost，使用 Tauri 命令读取文件`);
+            try {
+              // 使用 Tauri 命令读取文件并获取 base64 数据
+              const base64DataUrl = await invoke<string>("read_image_file", { filePath });
+              console.log(`[修复图片] ✓ 成功读取文件，base64 长度: ${base64DataUrl.length}`);
+              
+              // 将 base64 数据 URL 转换为 Blob
+              const response = await fetch(base64DataUrl);
+              const blob = await response.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              console.log(`[修复图片] ✓ 成功创建 Blob URL: ${blobUrl}`);
+              return blobUrl;
+            } catch (readError) {
+              console.error(`[修复图片] ✗ 读取文件失败: ${readError}`);
+              // 如果读取失败，返回 convertFileSrc 的结果，让 onerror 处理
+              return convertedUrl;
+            }
+          }
+          
+          // 如果返回的不是 asset.localhost，直接使用
+          // 如果后续加载失败，onerror 处理会使用 Blob URL 回退
+          console.log(`[修复图片] 使用 convertFileSrc URL: ${convertedUrl}`);
+          return convertedUrl;
+        } catch (e) {
+          console.error("[修复图片] 转换路径失败:", e);
+          return null;
+        }
+      };
       
       // 优先使用 data-image-path 属性（如果存在）
       if (dataPath) {
-        try {
-          // 规范化路径：将 Windows 反斜杠转换为正斜杠
-          const normalizedDataPath = dataPath.replace(/\\/g, '/');
-          img.src = convertFileSrc(normalizedDataPath);
-          return; // 已处理，继续下一个
-        } catch (e) {
-          console.error("转换图片路径失败:", e);
+        console.log(`[修复图片] 发现 data-image-path: ${dataPath}`);
+        
+        // 无论之前使用的是什么，都通过 createBlobUrlFromPath 重新创建
+        // 这样可以确保 asset.localhost URL 被正确处理（使用 Tauri 命令读取文件）
+        console.log("[修复图片] 从文件路径创建图片 URL");
+        const imageUrl = await createBlobUrlFromPath(dataPath);
+        if (imageUrl) {
+          img.src = imageUrl;
+          // 如果是 Blob URL，设置标记
+          if (imageUrl.startsWith('blob:')) {
+            img.setAttribute("data-use-blob", "true");
+          }
         }
       }
-      
       // 如果图片路径是 file:// 开头的，需要转换为 convertFileSrc
-      if (src.startsWith('file://')) {
+      else if (src.startsWith('file://')) {
         try {
           // 提取原始文件路径（去除 file:// 前缀）
           const filePath = src.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
           // 在 Windows 上，路径可能包含驱动器字母，需要特殊处理
           const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-          img.src = convertFileSrc(normalizedPath);
+          const blobUrl = await createBlobUrlFromPath(normalizedPath);
+          if (blobUrl) {
+            img.src = blobUrl;
+          } else {
+            img.src = convertFileSrc(normalizedPath);
+          }
           // 保存原始路径到 data 属性
           img.setAttribute("data-image-path", normalizedPath);
         } catch (e) {
-          console.error("转换图片路径失败:", e);
+          console.error("[修复图片] 转换 file:// 路径失败:", e);
         }
       }
       // 如果图片路径是 Tauri 临时 URL（http://localhost），尝试从 src 提取路径
@@ -137,13 +190,23 @@ function Note({ noteId }: NoteProps) {
         if (urlMatch && urlMatch[1]) {
           // 解码路径
           const decodedPath = decodeURIComponent(urlMatch[1]);
-          try {
-            img.src = convertFileSrc(decodedPath);
-            img.setAttribute("data-image-path", decodedPath);
-          } catch (e) {
-            console.error("从 Tauri URL 提取路径失败:", e);
+          const blobUrl = await createBlobUrlFromPath(decodedPath);
+          if (blobUrl) {
+            img.src = blobUrl;
+            img.setAttribute("data-use-blob", "true");
+          } else {
+            try {
+              img.src = convertFileSrc(decodedPath);
+            } catch (e) {
+              console.error("[修复图片] 从 Tauri URL 提取路径失败:", e);
+            }
           }
+          img.setAttribute("data-image-path", decodedPath);
         }
+      }
+      // 如果图片是 Blob URL 但没有 data-image-path，无法修复
+      else if (src.startsWith('blob:')) {
+        console.warn("[修复图片] 发现 Blob URL 但没有 data-image-path，无法修复:", src);
       }
       
       // 为图片添加样式和点击事件
@@ -158,7 +221,36 @@ function Note({ noteId }: NoteProps) {
           setShowDeleteImageConfirm(true);
         };
       }
-    });
+      
+      // 添加加载成功和失败的日志
+      const originalOnLoad = img.onload;
+      img.onload = (e) => {
+        console.log(`[修复图片] ✓ 图片加载成功: ${img.src.substring(0, 100)}...`);
+        if (originalOnLoad) {
+          originalOnLoad.call(img, e);
+        }
+      };
+      
+      const originalOnError = img.onerror;
+      img.onerror = async (e) => {
+        console.error(`[修复图片] ✗ 图片加载失败: ${img.src.substring(0, 100)}...`);
+        // 如果有 data-image-path，尝试使用 Blob URL 回退
+        const imagePath = img.getAttribute("data-image-path");
+        if (imagePath && !img.src.startsWith('blob:')) {
+          console.log("[修复图片] 尝试使用 Blob URL 回退");
+          const blobUrl = await createBlobUrlFromPath(imagePath);
+          if (blobUrl && blobUrl !== img.src) {
+            img.src = blobUrl;
+            img.setAttribute("data-use-blob", "true");
+            // 移除错误处理，避免循环
+            img.onerror = null;
+          }
+        }
+        if (originalOnError) {
+          originalOnError.call(img, e);
+        }
+      };
+    }
   }, []);
 
   // 加载便签数据
@@ -168,8 +260,10 @@ function Note({ noteId }: NoteProps) {
         const data = await invoke<NoteData | null>("get_note", { id: noteId });
         if (data && contentRef.current) {
           contentRef.current.innerHTML = data.content || "";
-          // 修复已保存图片的路径
-          fixSavedImages();
+          // 修复已保存图片的路径（异步执行，不需要等待）
+          fixSavedImages().catch(err => {
+            console.error("修复图片路径时出错:", err);
+          });
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
           setAlwaysOnTop(data.always_on_top === true);

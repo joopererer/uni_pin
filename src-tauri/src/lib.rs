@@ -507,6 +507,38 @@ fn save_image(image_data: String) -> Result<String, String> {
     Ok(filepath.to_string_lossy().to_string())
 }
 
+/// 读取图片文件并返回 base64 数据（用于创建 Blob URL）
+#[tauri::command]
+fn read_image_file(file_path: String) -> Result<String, String> {
+    use std::fs;
+    use base64::Engine;
+    
+    println!("[后端] read_image_file: 读取文件: {}", file_path);
+    
+    // 读取文件
+    let file_bytes = fs::read(&file_path)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    
+    // 转换为 base64
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
+    
+    // 根据文件扩展名确定 MIME 类型
+    let mime_type = if file_path.to_lowercase().ends_with(".png") {
+        "image/png"
+    } else if file_path.to_lowercase().ends_with(".jpg") || file_path.to_lowercase().ends_with(".jpeg") {
+        "image/jpeg"
+    } else if file_path.to_lowercase().ends_with(".gif") {
+        "image/gif"
+    } else if file_path.to_lowercase().ends_with(".webp") {
+        "image/webp"
+    } else {
+        "image/jpeg" // 默认
+    };
+    
+    // 返回 data URL 格式
+    Ok(format!("data:{};base64,{}", mime_type, base64_data))
+}
+
 /// 获取自启动状态
 #[tauri::command]
 fn get_auto_start(app: AppHandle) -> Result<bool, String> {
@@ -753,6 +785,7 @@ pub fn run() {
             get_window_size,
             get_all_note_windows,
             save_image,
+            read_image_file,
             get_clipboard_image,
             get_auto_start,
             set_auto_start,
