@@ -85,6 +85,13 @@ pub struct AppSettings {
     /// 界面语言 (zh, en)
     #[serde(default = "default_language")]
     pub language: String,
+    /// 菜单栏自动显示模式 (true: 鼠标悬停显示, false: 需要单击显示)
+    #[serde(default = "default_auto_show_toolbar")]
+    pub auto_show_toolbar: bool,
+}
+
+fn default_auto_show_toolbar() -> bool {
+    false  // 默认关闭，需要单击显示
 }
 
 fn default_language() -> String {
@@ -96,6 +103,7 @@ impl Default for AppSettings {
         Self {
             auto_start: false,
             language: "zh".to_string(),
+            auto_show_toolbar: false,
         }
     }
 }

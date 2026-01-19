@@ -32,6 +32,7 @@ function Manager() {
   const { t, tWith, language, changeLanguage } = useI18n();
   const [notes, setNotes] = useState<NoteData[]>([]);
   const [autoStart, setAutoStart] = useState(false);
+  const [autoShowToolbar, setAutoShowToolbar] = useState(false);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -59,12 +60,16 @@ function Manager() {
     try {
       const isAutoStart = await invoke<boolean>("get_auto_start");
       setAutoStart(isAutoStart);
+      const isAutoShowToolbar = await invoke<boolean>("get_auto_show_toolbar");
+      setAutoShowToolbar(isAutoShowToolbar);
     } catch (e) {
       console.error("加载设置失败:", e);
       // 如果获取失败，尝试从本地存储读取
       try {
         const stored = await invoke<boolean>("get_auto_start");
         setAutoStart(stored);
+        const storedToolbar = await invoke<boolean>("get_auto_show_toolbar");
+        setAutoShowToolbar(storedToolbar);
       } catch (e2) {
         console.error("从本地存储读取失败:", e2);
       }
@@ -135,6 +140,17 @@ function Manager() {
       setTimeout(() => loadNotes(), 200);
     } catch (e) {
       console.error("隐藏便签失败:", e);
+    }
+  };
+
+  // 切换菜单栏自动显示模式
+  const handleToggleAutoShowToolbar = async () => {
+    const newValue = !autoShowToolbar;
+    try {
+      await invoke("set_auto_show_toolbar", { enabled: newValue });
+      setAutoShowToolbar(newValue);
+    } catch (e) {
+      console.error("设置菜单栏显示模式失败:", e);
     }
   };
 
@@ -367,6 +383,13 @@ function Manager() {
             <div
               className={`toggle-switch ${autoStart ? "active" : ""}`}
               onClick={handleToggleAutoStart}
+            />
+          </div>
+          <div className="setting-item setting-item-spaced">
+            <span className="setting-label">{t("manager.autoShowToolbar")}</span>
+            <div
+              className={`toggle-switch ${autoShowToolbar ? "active" : ""}`}
+              onClick={handleToggleAutoShowToolbar}
             />
           </div>
           <div className="setting-item setting-item-spaced">

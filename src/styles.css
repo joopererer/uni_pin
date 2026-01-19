@@ -249,11 +249,33 @@ body,
   outline: none;
   word-wrap: break-word;
   white-space: pre-wrap;
+  box-sizing: border-box;
+  /* 确保在编辑模式下，内容区域高度计算考虑工具栏高度 */
+  transition: padding-top 0.3s ease;
+  /* Firefox 滚动条隐藏 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* 内容区域根据工具栏状态调整上边距 */
+.note-content.toolbar-visible {
+  padding-top: 44px;
+}
+
+.note-content.toolbar-hidden {
+  padding-top: 12px;
 }
 
 /* 工具栏显示时内容区域有上边距 */
 .note-container.toolbar-visible .note-content {
   padding-top: 44px;
+  transition: padding-top 0.3s ease;
+}
+
+/* 工具栏隐藏时内容区域不需要上边距，自动调整位置 */
+.note-container.toolbar-hidden .note-content {
+  padding-top: 12px;
+  transition: padding-top 0.3s ease;
 }
 
 .note-content:empty::before {
@@ -268,12 +290,21 @@ body,
   background: rgba(0, 0, 0, 0.15);
 }
 
+/* 图片容器 */
+.note-image-wrapper {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  margin: 8px 0;
+  border-radius: 6px;
+  overflow: visible;
+}
+
 .note-content img,
 .note-image {
   max-width: 100%;
   height: auto;
   border-radius: 6px;
-  margin: 8px 0;
   display: block;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   transition: transform 0.2s, box-shadow 0.2s;
@@ -283,6 +314,44 @@ body,
 .note-image:hover {
   transform: scale(1.02);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+/* 删除按钮 - 只在编辑模式下显示 */
+.note-content.editing .note-image-wrapper:hover .image-delete-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.image-delete-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(244, 67, 54, 0.9);
+  color: white;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  user-select: none;
+}
+
+.image-delete-btn:hover {
+  background: rgba(211, 47, 47, 1);
+  transform: scale(1.1);
+}
+
+.image-delete-btn:active {
+  transform: scale(0.95);
 }
 
 /* ============ 调整大小指示器 ============ */
@@ -301,6 +370,7 @@ body,
 }
 
 /* ============ 滚动条样式 ============ */
+/* 默认情况下滚动条隐藏，只在编辑模式或鼠标悬停时显示 */
 .note-content::-webkit-scrollbar {
   width: 6px;
 }
@@ -310,15 +380,26 @@ body,
   margin: 4px;
 }
 
+/* 默认隐藏滚动条 */
 .note-content::-webkit-scrollbar-thumb {
   background: var(--note-text, #5d4037);
-  opacity: 0.2;
+  opacity: 0;
   border-radius: 3px;
+  transition: opacity 0.3s ease;
 }
 
-.note-content::-webkit-scrollbar-thumb:hover {
+/* 编辑模式或鼠标悬停时显示滚动条 */
+.note-content.editing::-webkit-scrollbar-thumb,
+.note-content:hover::-webkit-scrollbar-thumb {
+  opacity: 0.2;
+}
+
+.note-content.editing::-webkit-scrollbar-thumb:hover,
+.note-content:hover::-webkit-scrollbar-thumb:hover {
   opacity: 0.4;
 }
+
+
 
 .note-content a {
   color: var(--note-text, #5d4037);

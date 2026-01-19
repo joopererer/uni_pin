@@ -22,14 +22,15 @@ fn generate_window_label() -> String {
 
 /// 创建一个新的便签窗口（内部使用）
 fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) -> Result<String, String> {
-    let (window_label, position, size, always_on_top) = match note_data {
+    let (window_label, position, size, always_on_top, should_show) = match note_data {
         Some(data) => (
             data.id.clone(),
             Some((data.position.x, data.position.y)),
             (data.size.width, data.size.height),
             data.always_on_top,
+            !data.closed, // 如果便签状态是未关闭，应该显示
         ),
-        None => (generate_window_label(), None, (280.0, 320.0), false), // 默认不置顶
+        None => (generate_window_label(), None, (280.0, 320.0), false, true), // 新创建的便签默认显示
     };
 
     let mut builder = WebviewWindowBuilder::new(
@@ -45,8 +46,8 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
     .always_on_top(always_on_top)
     .skip_taskbar(true)
     .resizable(true)
-    .visible(false)
-    .focused(true);
+    .visible(should_show) // 根据便签状态决定是否显示
+    .focused(should_show); // 如果需要显示，也聚焦
 
     if let Some((x, y)) = position {
         builder = builder.position(x, y);
@@ -54,7 +55,7 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
         builder = builder.center();
     }
 
-    let _window = builder
+    let window = builder
         .build()
         .map_err(|e| format!("创建窗口失败: {}", e))?;
 
@@ -66,7 +67,7 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
         }
     }
 
-    println!("📝 创建便签窗口: {}", window_label);
+    println!("📝 创建便签窗口: {} (显示: {})", window_label, should_show);
     Ok(window_label)
 }
 
@@ -257,15 +258,29 @@ fn show_note(app: AppHandle, state: State<'_, NoteStoreState>, id: String) -> Re
     
     // 检查窗口是否存在
     if let Some(window) = app.get_webview_window(&id) {
+        // 窗口存在，直接显示
         window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
         window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+        println!("✅ 显示便签窗口: {}", id);
     } else {
         // 窗口不存在，需要重新创建
+        println!("⚠️ 窗口不存在，重新创建: {}", id);
         let store = state.0.lock().unwrap();
         if let Some(note) = store.notes.get(&id) {
             let note_clone = note.clone();
             drop(store);
-            create_note_window_internal(&app, Some(&note_clone))?;
+            let window_label = create_note_window_internal(&app, Some(&note_clone))?;
+            // 创建后等待一小段时间再显示，确保窗口完全初始化
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            if let Some(window) = app.get_webview_window(&window_label) {
+                window.show().map_err(|e| format!("显示新创建的窗口失败: {}", e))?;
+                window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+                println!("✅ 新窗口已显示: {}", window_label);
+            } else {
+                return Err(format!("窗口创建后立即查找失败: {}", window_label));
+            }
+        } else {
+            return Err(format!("便签数据不存在: {}", id));
         }
     }
     Ok(())
@@ -570,6 +585,36 @@ fn set_language(state: State<'_, NoteStoreState>, language: String) -> Result<()
     Ok(())
 }
 
+/// 获取菜单栏自动显示模式
+#[tauri::command]
+fn get_auto_show_toolbar(state: State<'_, NoteStoreState>) -> bool {
+    let store = state.0.lock().unwrap();
+    store.settings.auto_show_toolbar
+}
+
+/// 设置菜单栏自动显示模式
+#[tauri::command]
+fn set_auto_show_toolbar(app: AppHandle, state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
+    {
+        let mut store = state.0.lock().unwrap();
+        store.settings.auto_show_toolbar = enabled;
+        save_notes(&store)?;
+    }
+    
+    // 通知所有便签窗口设置已更改
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("note-") {
+            let _ = window.eval(&format!(
+                "window.dispatchEvent(new CustomEvent('toolbarSettingChanged', {{ detail: {{ autoShow: {} }} }}));",
+                enabled
+            ));
+        }
+    }
+    
+    println!("✅ 菜单栏自动显示模式已设置为: {}", enabled);
+    Ok(())
+}
+
 /// 检查更新
 #[tauri::command]
 async fn check_update() -> Result<Option<serde_json::Value>, String> {
@@ -631,7 +676,9 @@ fn restore_saved_notes(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     let count = notes_to_restore.len();
     for note in notes_to_restore {
         match create_note_window_internal(app, Some(&note)) {
-            Ok(_) => {}
+            Ok(window_label) => {
+                println!("✅ 已恢复便签窗口: {} (应该已显示)", window_label);
+            }
             Err(e) => eprintln!("❌ 恢复便签 {} 失败: {}", note.id, e),
         }
     }
@@ -791,6 +838,8 @@ pub fn run() {
             set_auto_start,
             get_language,
             set_language,
+            get_auto_show_toolbar,
+            set_auto_show_toolbar,
             check_update
         ])
         .setup(|app| {

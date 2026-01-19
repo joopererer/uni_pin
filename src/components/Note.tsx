@@ -47,6 +47,8 @@ function Note({ noteId }: NoteProps) {
   const [showToolbar, setShowToolbar] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
+  const [autoShowToolbar, setAutoShowToolbar] = useState(false); // 菜单栏自动显示模式
+  const [isFocused, setIsFocused] = useState(false); // 便签是否获得焦点
   
   const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,15 +59,56 @@ function Note({ noteId }: NoteProps) {
 
   const theme = NOTE_THEMES[themeIndex];
 
+  // 加载菜单栏显示模式设置，并监听设置变化事件
+  useEffect(() => {
+    const loadToolbarSetting = async () => {
+      try {
+        const setting = await invoke<boolean>("get_auto_show_toolbar");
+        setAutoShowToolbar(setting);
+      } catch (e) {
+        console.error("加载菜单栏显示模式设置失败:", e);
+      }
+    };
+    
+    // 立即加载一次
+    loadToolbarSetting();
+    
+    // 监听设置变化事件（从管理器窗口触发）
+    const handleToolbarSettingChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ autoShow: boolean }>;
+      if (customEvent.detail) {
+        setAutoShowToolbar(customEvent.detail.autoShow);
+        console.log("菜单栏显示模式设置已更新:", customEvent.detail.autoShow);
+      }
+    };
+    window.addEventListener("toolbarSettingChanged", handleToolbarSettingChanged);
+    
+    // 定期检查设置变化作为备用（每3秒检查一次，防止事件系统失效）
+    const interval = setInterval(loadToolbarSetting, 3000);
+    
+    return () => {
+      window.removeEventListener("toolbarSettingChanged", handleToolbarSettingChanged);
+      clearInterval(interval);
+    };
+  }, []);
+
   // 工具栏显示逻辑
   useEffect(() => {
-    if (isEditing || isHovering) {
+    // 如果启用了自动显示模式，鼠标悬停或编辑时显示
+    // 如果未启用，只有编辑时显示（通过单击获取焦点）
+    // 但首次加载时总是显示（由首次加载 useEffect 控制隐藏）
+    const shouldShow = autoShowToolbar 
+      ? (isEditing || isHovering || isFocused)
+      : (isEditing || isFocused);
+    
+    if (shouldShow) {
       setShowToolbar(true);
       if (toolbarHideTimeoutRef.current) {
         clearTimeout(toolbarHideTimeoutRef.current);
         toolbarHideTimeoutRef.current = null;
       }
-    } else {
+    } else if (isLoaded) {
+      // 只有在已加载后才开始隐藏倒计时
       toolbarHideTimeoutRef.current = setTimeout(() => {
         setShowToolbar(false);
         setShowOpacitySlider(false);
@@ -77,19 +120,29 @@ function Note({ noteId }: NoteProps) {
         clearTimeout(toolbarHideTimeoutRef.current);
       }
     };
-  }, [isEditing, isHovering]);
+  }, [isEditing, isHovering, isFocused, autoShowToolbar, isLoaded]);
 
-  // 首次加载显示工具栏，2秒后自动隐藏
+  // 当失去焦点时，自动隐藏工具栏（无论哪种模式）
   useEffect(() => {
-    if (isLoaded) {
+    if (!isFocused && !isEditing && !isHovering && isLoaded) {
       const timer = setTimeout(() => {
-        if (!isEditing && !isHovering) {
+        setShowToolbar(false);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, isEditing, isHovering, isLoaded]);
+
+  // 首次加载显示工具栏，2秒后自动隐藏（仅在未启用自动显示模式时）
+  useEffect(() => {
+    if (isLoaded && !autoShowToolbar) {
+      const timer = setTimeout(() => {
+        if (!isEditing && !isHovering && !isFocused) {
           setShowToolbar(false);
         }
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [isLoaded]);
+  }, [isLoaded, autoShowToolbar, isEditing, isHovering, isFocused]);
 
   // 修复已保存图片的路径并绑定点击事件
   const fixSavedImages = useCallback(async () => {
@@ -209,17 +262,39 @@ function Note({ noteId }: NoteProps) {
         console.warn("[修复图片] 发现 Blob URL 但没有 data-image-path，无法修复:", src);
       }
       
-      // 为图片添加样式和点击事件
+      // 为图片添加样式和删除按钮
       if (!img.classList.contains('note-image')) {
         img.className = 'note-image';
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
-        img.style.margin = "8px 0";
-        img.style.cursor = "pointer";
-        img.onclick = () => {
-          setImageToDelete(img);
-          setShowDeleteImageConfirm(true);
-        };
+        img.style.margin = "0"; // 移除 margin，由容器处理
+        img.style.cursor = "default"; // 改为 default，不再是可点击的
+        
+        // 检查图片是否已经在包装容器中
+        let wrapper = img.parentElement as HTMLElement;
+        if (!wrapper || !wrapper.classList.contains('note-image-wrapper')) {
+          // 创建包装容器
+          wrapper = document.createElement('div');
+          wrapper.className = 'note-image-wrapper';
+          img.parentNode?.insertBefore(wrapper, img);
+          wrapper.appendChild(img);
+        }
+        
+        // 检查是否已有删除按钮
+        let deleteBtn = wrapper.querySelector('.image-delete-btn') as HTMLButtonElement;
+        if (!deleteBtn) {
+          deleteBtn = document.createElement('button');
+          deleteBtn.className = 'image-delete-btn';
+          deleteBtn.innerHTML = '×';
+          deleteBtn.title = '删除图片';
+          deleteBtn.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            setImageToDelete(img);
+            setShowDeleteImageConfirm(true);
+          };
+          wrapper.appendChild(deleteBtn);
+        }
       }
       
       // 添加加载成功和失败的日志
@@ -277,13 +352,24 @@ function Note({ noteId }: NoteProps) {
           }
         }
         setIsLoaded(true);
-        await invoke("show_note_window", { id: noteId });
+        // 窗口在创建时已经根据 closed 状态决定是否显示
+        // 这里只需要确保窗口可见（如果数据中 closed 为 false）
+        if (!data.closed) {
+          try {
+            await invoke("show_note_window", { id: noteId });
+          } catch (e) {
+            console.warn("显示窗口失败（可能已经显示）:", e);
+          }
+        }
       } catch (e) {
         console.error("加载便签数据失败:", e);
         setIsLoaded(true);
+        // 即使加载失败，也尝试显示窗口
         try {
           await invoke("show_note_window", { id: noteId });
-        } catch {}
+        } catch (err) {
+          console.warn("显示窗口失败:", err);
+        }
       }
     };
     loadNoteAndShow();
@@ -611,8 +697,28 @@ function Note({ noteId }: NoteProps) {
         img.className = "note-image";
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
-        img.style.margin = "8px 0";
-        img.style.cursor = "pointer";
+        img.style.margin = "0"; // 移除 margin，由容器处理
+        img.style.cursor = "default"; // 改为 default，不再是可点击的
+        
+        // 创建图片包装容器
+        const wrapper = document.createElement('div');
+        wrapper.className = 'note-image-wrapper';
+        
+        // 创建删除按钮
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'image-delete-btn';
+        deleteBtn.innerHTML = '×';
+        deleteBtn.title = '删除图片';
+        deleteBtn.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setImageToDelete(img);
+          setShowDeleteImageConfirm(true);
+        };
+        
+        wrapper.appendChild(img);
+        wrapper.appendChild(deleteBtn);
+        
         img.onload = () => {
           console.log("[插入图片] ✓ 图片元素加载成功");
         };
@@ -631,23 +737,19 @@ function Note({ noteId }: NoteProps) {
             }
           }
         };
-        img.onclick = () => {
-          setImageToDelete(img);
-          setShowDeleteImageConfirm(true);
-        };
 
         const selection = window.getSelection();
         if (selection && selection.rangeCount > 0 && contentRef.current?.contains(selection.anchorNode)) {
           const range = selection.getRangeAt(0);
           range.deleteContents();
-          range.insertNode(img);
-          range.setStartAfter(img);
+          range.insertNode(wrapper);
+          range.setStartAfter(wrapper);
           range.collapse(true);
           selection.removeAllRanges();
           selection.addRange(range);
           console.log("[插入图片] ✓ 图片已插入到当前光标位置");
         } else if (contentRef.current) {
-          contentRef.current.appendChild(img);
+          contentRef.current.appendChild(wrapper);
           console.log("[插入图片] ✓ 图片已追加到内容末尾");
         }
 
@@ -671,7 +773,13 @@ function Note({ noteId }: NoteProps) {
   // 确认删除图片
   const confirmDeleteImage = () => {
     if (imageToDelete) {
-      imageToDelete.remove();
+      // 如果图片在包装容器中，删除整个容器；否则只删除图片
+      const wrapper = imageToDelete.parentElement;
+      if (wrapper && wrapper.classList.contains('note-image-wrapper')) {
+        wrapper.remove();
+      } else {
+        imageToDelete.remove();
+      }
       handleContentChange();
     }
     setShowDeleteImageConfirm(false);
@@ -755,11 +863,16 @@ function Note({ noteId }: NoteProps) {
   // 编辑状态处理
   const handleContentFocus = () => {
     setIsEditing(true);
+    setIsFocused(true);
   };
 
   const handleContentBlur = () => {
     setIsEditing(false);
     handleContentChange();
+    // 失去焦点后，无论哪种模式都自动关闭菜单（延迟清除焦点状态）
+    setTimeout(() => {
+      setIsFocused(false);
+    }, 100);
   };
 
   // 鼠标进入/离开
@@ -770,6 +883,25 @@ function Note({ noteId }: NoteProps) {
   const handleMouseLeave = () => {
     setIsHovering(false);
     setShowOpacitySlider(false);
+  };
+
+  // 单击便签容器获取焦点（用于非自动显示模式）
+  const handleContainerClick = (e: React.MouseEvent) => {
+    // 如果点击的不是内容区域或工具栏按钮，让内容区域获取焦点
+    const target = e.target as HTMLElement;
+    // 如果点击的是图片或图片相关元素，不需要处理（图片点击由图片自己的事件处理）
+    if (target.closest('.note-image-wrapper') || target.closest('img')) {
+      return;
+    }
+    if (target === containerRef.current || 
+        (target.closest('.note-header') && !target.closest('.note-toolbar') && !target.closest('button'))) {
+      if (contentRef.current) {
+        contentRef.current.focus();
+        setIsFocused(true);
+        // 如果点击了容器，也需要触发编辑模式（为了显示删除按钮）
+        setIsEditing(true);
+      }
+    }
   };
 
   // 计算实际的背景透明度
@@ -783,6 +915,7 @@ function Note({ noteId }: NoteProps) {
         onContextMenu={handleContextMenu}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onClick={handleContainerClick}
         style={{
           "--note-bg": theme.bg,
           "--note-header": theme.header,
@@ -858,7 +991,7 @@ function Note({ noteId }: NoteProps) {
 
         <div
           ref={contentRef}
-          className="note-content"
+          className={`note-content ${(isEditing || isFocused) ? 'editing' : ''} ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
           contentEditable
           onPaste={handlePaste}
           onInput={handleContentChange}
