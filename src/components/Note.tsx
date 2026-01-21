@@ -24,6 +24,7 @@ interface NoteData {
   closed: boolean;
   opacity: number;
   always_on_top: boolean;
+  created_at?: number; // 创建时间戳（秒）
 }
 
 interface NoteProps {
@@ -354,9 +355,28 @@ function Note({ noteId }: NoteProps) {
         if (data && !data.closed) {
           try {
             await invoke("show_note_window", { id: noteId });
+            
+            // 检查是否是新创建的便签（创建时间在最近5秒内）
+            const isNewNote = data.created_at && (Date.now() / 1000 - data.created_at) < 5;
+            
+            // 只有新创建的便签才自动focus内容区域
+            if (isNewNote) {
+              setTimeout(() => {
+                if (contentRef.current) {
+                  contentRef.current.focus();
+                }
+              }, 150);
+            }
           } catch (e) {
             console.warn("显示窗口失败（可能已经显示）:", e);
           }
+        } else if (!data) {
+          // 如果是新创建的便签（data为null），自动focus
+          setTimeout(() => {
+            if (contentRef.current) {
+              contentRef.current.focus();
+            }
+          }, 150);
         }
       } catch (e) {
         console.error("加载便签数据失败:", e);
