@@ -241,6 +241,8 @@ body,
   width: 100%;
   height: 100%;
   padding: 12px 16px;
+  padding-right: 22px; /* 16px + 6px 滚动条宽度，让滚动条覆盖在内容上 */
+  margin-right: -6px; /* 负边距补偿滚动条宽度，避免内容被压缩 */
   overflow-y: auto;
   overflow-x: hidden;
   font-size: 14px;
@@ -252,9 +254,7 @@ body,
   box-sizing: border-box;
   /* 确保在编辑模式下，内容区域高度计算考虑工具栏高度 */
   transition: padding-top 0.3s ease;
-  /* Firefox 滚动条隐藏 */
-  scrollbar-width: none;
-  -ms-overflow-style: none;
+  /* Firefox 滚动条默认隐藏（在失去焦点时） */
 }
 
 /* 内容区域根据工具栏状态调整上边距 */
@@ -291,14 +291,7 @@ body,
 }
 
 /* 图片容器 */
-.note-image-wrapper {
-  position: relative;
-  display: inline-block;
-  max-width: 100%;
-  margin: 8px 0;
-  border-radius: 6px;
-  overflow: visible;
-}
+/* 移除 wrapper 样式，不再需要包装容器 */
 
 .note-content img,
 .note-image {
@@ -316,43 +309,7 @@ body,
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
-/* 删除按钮 - 只在编辑模式下显示 */
-.note-content.editing .note-image-wrapper:hover .image-delete-btn {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.image-delete-btn {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: rgba(244, 67, 54, 0.9);
-  color: white;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.2s ease, background 0.2s ease, transform 0.2s ease;
-  z-index: 100;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  user-select: none;
-}
-
-.image-delete-btn:hover {
-  background: rgba(211, 47, 47, 1);
-  transform: scale(1.1);
-}
-
-.image-delete-btn:active {
-  transform: scale(0.95);
-}
+/* 删除按钮样式已移除，改为点击图片弹出删除提示框 */
 
 /* ============ 调整大小指示器 ============ */
 .resize-indicator {
@@ -370,7 +327,7 @@ body,
 }
 
 /* ============ 滚动条样式 ============ */
-/* 默认情况下滚动条隐藏，只在编辑模式或鼠标悬停时显示 */
+/* 滚动条覆盖在内容上，不占用宽度 */
 .note-content::-webkit-scrollbar {
   width: 6px;
 }
@@ -380,23 +337,49 @@ body,
   margin: 4px;
 }
 
-/* 默认隐藏滚动条 */
+/* 默认显示滚动条（编辑模式或鼠标悬停时），使用便签主题色 */
 .note-content::-webkit-scrollbar-thumb {
   background: var(--note-text, #5d4037);
-  opacity: 0;
+  opacity: 0.2;
   border-radius: 3px;
   transition: opacity 0.3s ease;
 }
 
-/* 编辑模式或鼠标悬停时显示滚动条 */
-.note-content.editing::-webkit-scrollbar-thumb,
-.note-content:hover::-webkit-scrollbar-thumb {
+.note-content::-webkit-scrollbar-thumb:hover {
+  opacity: 0.4;
+}
+
+/* 编辑模式或鼠标悬停便签容器时显示滚动条 */
+.note-container:hover .note-content::-webkit-scrollbar-thumb,
+.note-content.editing::-webkit-scrollbar-thumb {
   opacity: 0.2;
 }
 
-.note-content.editing::-webkit-scrollbar-thumb:hover,
-.note-content:hover::-webkit-scrollbar-thumb:hover {
+.note-container:hover .note-content::-webkit-scrollbar-thumb:hover,
+.note-content.editing::-webkit-scrollbar-thumb:hover {
   opacity: 0.4;
+}
+
+/* 失去焦点时隐藏滚动条 */
+.note-content:not(.editing):not(:hover)::-webkit-scrollbar-thumb {
+  opacity: 0;
+}
+
+/* Firefox 滚动条显示 */
+.note-content {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 64, 55, 0.2) transparent; /* 使用便签主题色 */
+}
+
+.note-container:hover .note-content,
+.note-content.editing {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 64, 55, 0.2) transparent;
+}
+
+/* 失去焦点时隐藏 Firefox 滚动条 */
+.note-content:not(.editing):not(:hover) {
+  scrollbar-width: none;
 }
 
 

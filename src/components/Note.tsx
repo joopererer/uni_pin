@@ -154,44 +154,33 @@ function Note({ noteId }: NoteProps) {
       // 检查图片路径是否需要转换
       const src = img.src;
       const dataPath = img.getAttribute("data-image-path");
-      const useBlob = img.getAttribute("data-use-blob") === "true";
       
       // 辅助函数：从文件路径创建 Blob URL
+      // 在生产环境中，直接使用 Tauri 命令读取文件，确保兼容性
       const createBlobUrlFromPath = async (filePath: string): Promise<string | null> => {
         try {
           console.log(`[修复图片] 从文件路径创建 Blob URL: ${filePath}`);
           
-          // 先尝试使用 convertFileSrc 获取 URL
-          const normalizedPath = filePath.replace(/\\/g, '/');
-          const convertedUrl = convertFileSrc(normalizedPath);
-          console.log(`[修复图片] convertFileSrc 返回: ${convertedUrl}`);
-          
-          // 如果返回 asset.localhost，直接使用 Tauri 命令读取文件
-          // 因为在开发模式下 asset.localhost 可能无法工作
-          if (convertedUrl.includes('asset.localhost')) {
-            console.log(`[修复图片] 检测到 asset.localhost，使用 Tauri 命令读取文件`);
-            try {
-              // 使用 Tauri 命令读取文件并获取 base64 数据
-              const base64DataUrl = await invoke<string>("read_image_file", { filePath });
-              console.log(`[修复图片] ✓ 成功读取文件，base64 长度: ${base64DataUrl.length}`);
-              
-              // 将 base64 数据 URL 转换为 Blob
-              const response = await fetch(base64DataUrl);
-              const blob = await response.blob();
-              const blobUrl = URL.createObjectURL(blob);
-              console.log(`[修复图片] ✓ 成功创建 Blob URL: ${blobUrl}`);
-              return blobUrl;
-            } catch (readError) {
-              console.error(`[修复图片] ✗ 读取文件失败: ${readError}`);
-              // 如果读取失败，返回 convertFileSrc 的结果，让 onerror 处理
-              return convertedUrl;
-            }
+          // 直接使用 Tauri 命令读取文件并创建 Blob URL
+          // 这样可以确保在开发和生产环境中都能正常工作
+          try {
+            const base64DataUrl = await invoke<string>("read_image_file", { filePath });
+            console.log(`[修复图片] ✓ 成功读取文件，base64 长度: ${base64DataUrl.length}`);
+            
+            // 将 base64 数据 URL 转换为 Blob
+            const response = await fetch(base64DataUrl);
+            const blob = await response.blob();
+            const blobUrl = URL.createObjectURL(blob);
+            console.log(`[修复图片] ✓ 成功创建 Blob URL: ${blobUrl}`);
+            return blobUrl;
+          } catch (readError) {
+            console.error(`[修复图片] ✗ 读取文件失败，尝试使用 convertFileSrc: ${readError}`);
+            // 如果读取失败，尝试使用 convertFileSrc
+            const normalizedPath = filePath.replace(/\\/g, '/');
+            const convertedUrl = convertFileSrc(normalizedPath);
+            console.log(`[修复图片] 使用 convertFileSrc URL: ${convertedUrl}`);
+            return convertedUrl;
           }
-          
-          // 如果返回的不是 asset.localhost，直接使用
-          // 如果后续加载失败，onerror 处理会使用 Blob URL 回退
-          console.log(`[修复图片] 使用 convertFileSrc URL: ${convertedUrl}`);
-          return convertedUrl;
         } catch (e) {
           console.error("[修复图片] 转换路径失败:", e);
           return null;
@@ -202,15 +191,22 @@ function Note({ noteId }: NoteProps) {
       if (dataPath) {
         console.log(`[修复图片] 发现 data-image-path: ${dataPath}`);
         
-        // 无论之前使用的是什么，都通过 createBlobUrlFromPath 重新创建
-        // 这样可以确保 asset.localhost URL 被正确处理（使用 Tauri 命令读取文件）
-        console.log("[修复图片] 从文件路径创建图片 URL");
-        const imageUrl = await createBlobUrlFromPath(dataPath);
-        if (imageUrl) {
-          img.src = imageUrl;
-          // 如果是 Blob URL，设置标记
-          if (imageUrl.startsWith('blob:')) {
-            img.setAttribute("data-use-blob", "true");
+        // 检查当前 src 是否已经有效（比如已经是有效的 Blob URL）
+        // 如果当前 src 是有效的 Blob URL 且已加载，不需要重新加载
+        if (src.startsWith('blob:') && img.complete && img.naturalWidth > 0) {
+          console.log("[修复图片] 图片已经是有效的 Blob URL 且已加载，跳过重新加载");
+          // 即使不重新加载，也要确保有正确的样式和点击事件（在下面处理）
+        } else {
+          // 无论之前使用的是什么，都通过 createBlobUrlFromPath 重新创建
+          // 这样可以确保 asset.localhost URL 被正确处理（使用 Tauri 命令读取文件）
+          console.log("[修复图片] 从文件路径创建图片 URL");
+          const imageUrl = await createBlobUrlFromPath(dataPath);
+          if (imageUrl) {
+            img.src = imageUrl;
+            // 如果是 Blob URL，设置标记
+            if (imageUrl.startsWith('blob:')) {
+              img.setAttribute("data-use-blob", "true");
+            }
           }
         }
       }
@@ -260,42 +256,32 @@ function Note({ noteId }: NoteProps) {
       // 如果图片是 Blob URL 但没有 data-image-path，无法修复
       else if (src.startsWith('blob:')) {
         console.warn("[修复图片] 发现 Blob URL 但没有 data-image-path，无法修复:", src);
+        // 即使无法修复，也要确保图片有正确的样式和点击事件
       }
       
-      // 为图片添加样式和删除按钮
+      // 如果图片已经有正确的 src（比如已经是有效的 Blob URL 或 asset URL），不需要重新处理
+      // 但需要确保图片有正确的样式和点击事件
+      
+      // 为图片添加样式（无论是否已经有 note-image class）
+      // 确保图片有正确的样式
       if (!img.classList.contains('note-image')) {
         img.className = 'note-image';
-        img.style.maxWidth = "100%";
-        img.style.borderRadius = "4px";
-        img.style.margin = "0"; // 移除 margin，由容器处理
-        img.style.cursor = "default"; // 改为 default，不再是可点击的
-        
-        // 检查图片是否已经在包装容器中
-        let wrapper = img.parentElement as HTMLElement;
-        if (!wrapper || !wrapper.classList.contains('note-image-wrapper')) {
-          // 创建包装容器
-          wrapper = document.createElement('div');
-          wrapper.className = 'note-image-wrapper';
-          img.parentNode?.insertBefore(wrapper, img);
-          wrapper.appendChild(img);
-        }
-        
-        // 检查是否已有删除按钮
-        let deleteBtn = wrapper.querySelector('.image-delete-btn') as HTMLButtonElement;
-        if (!deleteBtn) {
-          deleteBtn = document.createElement('button');
-          deleteBtn.className = 'image-delete-btn';
-          deleteBtn.innerHTML = '×';
-          deleteBtn.title = '删除图片';
-          deleteBtn.onclick = (e) => {
-            e.stopPropagation();
-            e.preventDefault();
-            setImageToDelete(img);
-            setShowDeleteImageConfirm(true);
-          };
-          wrapper.appendChild(deleteBtn);
-        }
       }
+      img.style.maxWidth = "100%";
+      img.style.borderRadius = "4px";
+      img.style.margin = "0";
+      img.style.cursor = "pointer"; // 改为 pointer，表示可点击
+      
+      // 添加点击事件：点击图片弹出删除提示框
+      // 移除旧的事件监听器（如果存在），避免重复绑定
+      img.onclick = null; // 清除旧的事件监听器
+      img.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        console.log('[图片点击] 点击图片，弹出删除提示框');
+        setImageToDelete(img);
+        setShowDeleteImageConfirm(true);
+      };
       
       // 添加加载成功和失败的日志
       const originalOnLoad = img.onload;
@@ -334,11 +320,12 @@ function Note({ noteId }: NoteProps) {
       try {
         const data = await invoke<NoteData | null>("get_note", { id: noteId });
         if (data && contentRef.current) {
+          // 先设置内容，立即显示
           contentRef.current.innerHTML = data.content || "";
-          // 修复已保存图片的路径（异步执行，不需要等待）
-          fixSavedImages().catch(err => {
-            console.error("修复图片路径时出错:", err);
-          });
+          // 立即设置 isLoaded，让内容先显示，不等待图片加载
+          setIsLoaded(true);
+          
+          // 设置主题和其他属性
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
           setAlwaysOnTop(data.always_on_top === true);
@@ -350,11 +337,21 @@ function Note({ noteId }: NoteProps) {
             const appWindow = getCurrentWindow();
             appWindow.setAlwaysOnTop(false).catch(console.error);
           }
+          
+          // 异步修复图片路径，不阻塞内容显示
+          // 使用 setTimeout 让浏览器有机会先渲染内容
+          setTimeout(() => {
+            fixSavedImages().catch(err => {
+              console.error("修复图片路径时出错:", err);
+            });
+          }, 0);
+        } else {
+          setIsLoaded(true);
         }
-        setIsLoaded(true);
+        
         // 窗口在创建时已经根据 closed 状态决定是否显示
         // 这里只需要确保窗口可见（如果数据中 closed 为 false）
-        if (!data.closed) {
+        if (data && !data.closed) {
           try {
             await invoke("show_note_window", { id: noteId });
           } catch (e) {
@@ -697,27 +694,17 @@ function Note({ noteId }: NoteProps) {
         img.className = "note-image";
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
-        img.style.margin = "0"; // 移除 margin，由容器处理
-        img.style.cursor = "default"; // 改为 default，不再是可点击的
+        img.style.margin = "0";
+        img.style.cursor = "pointer"; // 改为 pointer，表示可点击
         
-        // 创建图片包装容器
-        const wrapper = document.createElement('div');
-        wrapper.className = 'note-image-wrapper';
-        
-        // 创建删除按钮
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'image-delete-btn';
-        deleteBtn.innerHTML = '×';
-        deleteBtn.title = '删除图片';
-        deleteBtn.onclick = (e) => {
+        // 添加点击事件：点击图片弹出删除提示框
+        img.onclick = (e) => {
           e.stopPropagation();
           e.preventDefault();
+          console.log('[图片点击] 点击图片，弹出删除提示框');
           setImageToDelete(img);
           setShowDeleteImageConfirm(true);
         };
-        
-        wrapper.appendChild(img);
-        wrapper.appendChild(deleteBtn);
         
         img.onload = () => {
           console.log("[插入图片] ✓ 图片元素加载成功");
@@ -742,14 +729,14 @@ function Note({ noteId }: NoteProps) {
         if (selection && selection.rangeCount > 0 && contentRef.current?.contains(selection.anchorNode)) {
           const range = selection.getRangeAt(0);
           range.deleteContents();
-          range.insertNode(wrapper);
-          range.setStartAfter(wrapper);
+          range.insertNode(img);
+          range.setStartAfter(img);
           range.collapse(true);
           selection.removeAllRanges();
           selection.addRange(range);
           console.log("[插入图片] ✓ 图片已插入到当前光标位置");
         } else if (contentRef.current) {
-          contentRef.current.appendChild(wrapper);
+          contentRef.current.appendChild(img);
           console.log("[插入图片] ✓ 图片已追加到内容末尾");
         }
 
@@ -773,13 +760,8 @@ function Note({ noteId }: NoteProps) {
   // 确认删除图片
   const confirmDeleteImage = () => {
     if (imageToDelete) {
-      // 如果图片在包装容器中，删除整个容器；否则只删除图片
-      const wrapper = imageToDelete.parentElement;
-      if (wrapper && wrapper.classList.contains('note-image-wrapper')) {
-        wrapper.remove();
-      } else {
-        imageToDelete.remove();
-      }
+      // 直接删除图片元素
+      imageToDelete.remove();
       handleContentChange();
     }
     setShowDeleteImageConfirm(false);
@@ -867,12 +849,10 @@ function Note({ noteId }: NoteProps) {
   };
 
   const handleContentBlur = () => {
+    // 同步清除编辑状态和焦点状态，确保状态一致性
     setIsEditing(false);
+    setIsFocused(false);
     handleContentChange();
-    // 失去焦点后，无论哪种模式都自动关闭菜单（延迟清除焦点状态）
-    setTimeout(() => {
-      setIsFocused(false);
-    }, 100);
   };
 
   // 鼠标进入/离开
@@ -889,17 +869,19 @@ function Note({ noteId }: NoteProps) {
   const handleContainerClick = (e: React.MouseEvent) => {
     // 如果点击的不是内容区域或工具栏按钮，让内容区域获取焦点
     const target = e.target as HTMLElement;
-    // 如果点击的是图片或图片相关元素，不需要处理（图片点击由图片自己的事件处理）
-    if (target.closest('.note-image-wrapper') || target.closest('img')) {
+    // 如果点击的是图片，不需要处理（图片点击由图片自己的事件处理）
+    if (target.tagName === 'IMG' || target.closest('img')) {
+      return;
+    }
+    // 如果点击的是内容区域本身，不需要处理（内容区域的点击会触发 focus）
+    if (target === contentRef.current || target.closest('.note-content')) {
       return;
     }
     if (target === containerRef.current || 
         (target.closest('.note-header') && !target.closest('.note-toolbar') && !target.closest('button'))) {
+      // 只调用 focus()，让 handleContentFocus 统一处理状态更新
       if (contentRef.current) {
         contentRef.current.focus();
-        setIsFocused(true);
-        // 如果点击了容器，也需要触发编辑模式（为了显示删除按钮）
-        setIsEditing(true);
       }
     }
   };
@@ -991,7 +973,7 @@ function Note({ noteId }: NoteProps) {
 
         <div
           ref={contentRef}
-          className={`note-content ${(isEditing || isFocused) ? 'editing' : ''} ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
+          className={`note-content ${isEditing ? 'editing' : 'not-editing'} ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
           contentEditable
           onPaste={handlePaste}
           onInput={handleContentChange}
