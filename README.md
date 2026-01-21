@@ -2,6 +2,8 @@
 
 A lightweight desktop sticky notes application built with Tauri v2 and React.
 
+**Version: 0.2.0**
+
 ## Features
 
 - 🎯 **System Tray Integration** - Runs in the system tray, no taskbar clutter
