@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import ConfirmDialog from "./ConfirmDialog";
 import { useI18n } from "../hooks/useI18n";
+// logger 在 main.tsx 中导入以初始化日志系统，这里不需要导入
 
 // 预定义的便签颜色主题
 const NOTE_THEMES = [
@@ -147,14 +148,27 @@ function Note({ noteId }: NoteProps) {
 
   // 修复已保存图片的路径并绑定点击事件
   const fixSavedImages = useCallback(async () => {
-    if (!contentRef.current) return;
+    if (!contentRef.current) {
+      console.log("[修复图片] contentRef.current 为空，跳过");
+      return;
+    }
     
     const images = contentRef.current.querySelectorAll('img');
+    console.log(`[修复图片] 开始修复图片，共 ${images.length} 张`);
     
+    if (images.length === 0) {
+      console.log("[修复图片] 没有图片需要修复");
+      return;
+    }
+    
+    // 使用 for 循环串行处理，但添加错误处理确保单个图片失败不会阻塞其他图片
     for (const img of Array.from(images)) {
+      try {
       // 检查图片路径是否需要转换
       const src = img.src;
-      const dataPath = img.getAttribute("data-image-path");
+      let dataPath = img.getAttribute("data-image-path");
+      
+      console.log(`[修复图片] 处理图片 - src: ${src.substring(0, 100)}..., data-image-path: ${dataPath || '无'}`);
       
       // 辅助函数：从文件路径创建 Blob URL
       // 在生产环境中，直接使用 Tauri 命令读取文件，确保兼容性
@@ -162,25 +176,77 @@ function Note({ noteId }: NoteProps) {
         try {
           console.log(`[修复图片] 从文件路径创建 Blob URL: ${filePath}`);
           
+          // 规范化路径（处理 Windows 路径格式）
+          let normalizedPath = filePath;
+          // 如果路径包含反斜杠，转换为正斜杠（但保留 Windows 驱动器字母）
+          if (normalizedPath.includes('\\')) {
+            normalizedPath = normalizedPath.replace(/\\/g, '/');
+            // 如果路径是 Windows 绝对路径（如 C:/path），确保格式正确
+            if (normalizedPath.match(/^[A-Za-z]:\//)) {
+              // Windows 绝对路径，保持不变
+            } else if (normalizedPath.startsWith('/')) {
+              // Unix 风格路径，可能需要移除开头的斜杠（如果路径是 C:/path 格式）
+              // 但这里我们保持原样
+            }
+          }
+          
+          // 添加超时机制，防止读取文件时间过长导致卡住
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('读取文件超时')), 10000); // 10秒超时
+          });
+          
           // 直接使用 Tauri 命令读取文件并创建 Blob URL
           // 这样可以确保在开发和生产环境中都能正常工作
           try {
-            const base64DataUrl = await invoke<string>("read_image_file", { filePath });
+            // 尝试使用原始路径
+            let base64DataUrl: string;
+            try {
+              base64DataUrl = await Promise.race([
+                invoke<string>("read_image_file", { filePath: filePath }),
+                timeoutPromise
+              ]);
+            } catch (e1) {
+              // 如果原始路径失败，尝试使用规范化路径
+              console.log(`[修复图片] 原始路径失败，尝试规范化路径: ${normalizedPath}`);
+              try {
+                base64DataUrl = await Promise.race([
+                  invoke<string>("read_image_file", { filePath: normalizedPath }),
+                  timeoutPromise
+                ]);
+              } catch (e2) {
+                throw e2; // 重新抛出错误
+              }
+            }
+            
             console.log(`[修复图片] ✓ 成功读取文件，base64 长度: ${base64DataUrl.length}`);
             
-            // 将 base64 数据 URL 转换为 Blob
-            const response = await fetch(base64DataUrl);
-            const blob = await response.blob();
+            // 将 base64 数据 URL 转为 Blob（不用 fetch，Tauri WebView 下 fetch(data:) 会 Failed to fetch）
+            const parts = base64DataUrl.split(",");
+            if (parts.length !== 2) {
+              throw new Error("无效的 base64 数据格式");
+            }
+            const mimeMatch = parts[0].match(/data:([^;]+)/);
+            const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+            const binaryString = atob(parts[1]);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: mimeType });
             const blobUrl = URL.createObjectURL(blob);
             console.log(`[修复图片] ✓ 成功创建 Blob URL: ${blobUrl}`);
             return blobUrl;
           } catch (readError) {
-            console.error(`[修复图片] ✗ 读取文件失败，尝试使用 convertFileSrc: ${readError}`);
-            // 如果读取失败，尝试使用 convertFileSrc
-            const normalizedPath = filePath.replace(/\\/g, '/');
-            const convertedUrl = convertFileSrc(normalizedPath);
-            console.log(`[修复图片] 使用 convertFileSrc URL: ${convertedUrl}`);
-            return convertedUrl;
+            console.error(`[修复图片] ✗ 读取文件失败: ${readError}`);
+            // 如果读取失败，尝试使用 convertFileSrc（作为最后的回退）
+            try {
+              const convertedUrl = convertFileSrc(normalizedPath);
+              console.log(`[修复图片] 使用 convertFileSrc URL: ${convertedUrl}`);
+              return convertedUrl;
+            } catch (e2) {
+              console.error(`[修复图片] ✗ convertFileSrc 也失败: ${e2}`);
+              return null;
+            }
           }
         } catch (e) {
           console.error("[修复图片] 转换路径失败:", e);
@@ -191,22 +257,76 @@ function Note({ noteId }: NoteProps) {
       // 优先使用 data-image-path 属性（如果存在）
       if (dataPath) {
         console.log(`[修复图片] 发现 data-image-path: ${dataPath}`);
+        console.log(`[修复图片] 当前 src: ${src}`);
+        console.log(`[修复图片] 图片状态: complete=${img.complete}, naturalWidth=${img.naturalWidth}, naturalHeight=${img.naturalHeight}`);
         
-        // 检查当前 src 是否已经有效（比如已经是有效的 Blob URL）
-        // 如果当前 src 是有效的 Blob URL 且已加载，不需要重新加载
-        if (src.startsWith('blob:') && img.complete && img.naturalWidth > 0) {
-          console.log("[修复图片] 图片已经是有效的 Blob URL 且已加载，跳过重新加载");
-          // 即使不重新加载，也要确保有正确的样式和点击事件（在下面处理）
-        } else {
-          // 无论之前使用的是什么，都通过 createBlobUrlFromPath 重新创建
-          // 这样可以确保 asset.localhost URL 被正确处理（使用 Tauri 命令读取文件）
-          console.log("[修复图片] 从文件路径创建图片 URL");
+        // 检查是否是 release 模式
+        // 在 release 模式下，window.location.href 不包含 localhost
+        // 或者可以通过检查是否有 dev server 来判断
+        const isDevMode = window.location.href.includes('localhost') || window.location.href.includes('127.0.0.1');
+        const isReleaseMode = !isDevMode;
+        
+        console.log(`[修复图片] 运行模式: ${isReleaseMode ? 'RELEASE' : 'DEV'}`);
+        
+        // 在 release 模式下，总是通过 read_image_file 重新创建 Blob URL
+        // 这样可以避免 asset:// URL 在 release 模式下无法工作的问题
+        // 即使图片看起来已经加载成功，也重新加载以确保兼容性
+        if (isReleaseMode) {
+          console.log("[修复图片] RELEASE 模式：强制重新加载图片");
           const imageUrl = await createBlobUrlFromPath(dataPath);
           if (imageUrl) {
             img.src = imageUrl;
+            // 确保 data-image-path 属性被保留
+            if (!img.getAttribute("data-image-path")) {
+              img.setAttribute("data-image-path", dataPath);
+            }
             // 如果是 Blob URL，设置标记
             if (imageUrl.startsWith('blob:')) {
               img.setAttribute("data-use-blob", "true");
+            }
+            console.log(`[修复图片] ✓ 图片 URL 已更新: ${imageUrl.substring(0, 100)}...`);
+          } else {
+            console.error(`[修复图片] ✗ 无法创建图片 URL，文件路径: ${dataPath}`);
+          }
+        } else {
+          // 在开发模式下，检查是否需要重新加载
+          const needsReload = 
+            // 如果当前是 Blob URL，需要重新加载（因为 Blob URL 在页面刷新后失效）
+            src.startsWith('blob:') ||
+            // 如果图片加载失败，需要重新加载
+            !img.complete ||
+            img.naturalWidth === 0 ||
+            // 如果是 asset URL，需要重新加载
+            src.includes('asset://') ||
+            src.includes('asset.localhost') ||
+            // 如果是空的或无效的 src，需要重新加载（页面刚加载时）
+            !src || src === 'about:blank' ||
+            // 如果是 file:// URL，需要重新加载
+            src.startsWith('file://');
+          
+          if (needsReload) {
+            console.log("[修复图片] DEV 模式：需要重新加载图片");
+            const imageUrl = await createBlobUrlFromPath(dataPath);
+            if (imageUrl) {
+              img.src = imageUrl;
+              // 确保 data-image-path 属性被保留
+              if (!img.getAttribute("data-image-path")) {
+                img.setAttribute("data-image-path", dataPath);
+              }
+              // 如果是 Blob URL，设置标记
+              if (imageUrl.startsWith('blob:')) {
+                img.setAttribute("data-use-blob", "true");
+              }
+              console.log(`[修复图片] ✓ 图片 URL 已更新: ${imageUrl.substring(0, 100)}...`);
+            } else {
+              console.error(`[修复图片] ✗ 无法创建图片 URL，文件路径: ${dataPath}`);
+            }
+          } else {
+            // 在开发模式下，如果图片已经加载成功，可以跳过重新加载
+            // 但确保 data-image-path 属性存在
+            console.log("[修复图片] DEV 模式：图片已经有效，跳过重新加载");
+            if (!img.getAttribute("data-image-path")) {
+              img.setAttribute("data-image-path", dataPath);
             }
           }
         }
@@ -258,6 +378,20 @@ function Note({ noteId }: NoteProps) {
       else if (src.startsWith('blob:')) {
         console.warn("[修复图片] 发现 Blob URL 但没有 data-image-path，无法修复:", src);
         // 即使无法修复，也要确保图片有正确的样式和点击事件
+      }
+      // 如果图片 src 为空或无效，且没有 data-image-path，无法修复
+      else if (!src || src === 'about:blank' || src.trim() === '') {
+        console.warn("[修复图片] 发现无效的图片 src，且没有 data-image-path，无法修复:", src);
+      }
+      // 如果图片是其他格式的 URL（比如 http://, https://），不需要处理
+      else if (src.startsWith('http://') || src.startsWith('https://')) {
+        console.log("[修复图片] 发现网络图片 URL，跳过处理:", src);
+      }
+      // 如果图片是其他未知格式，尝试检查是否需要处理
+      else {
+        console.warn("[修复图片] 发现未知格式的图片 URL，且没有 data-image-path:", src);
+        // 尝试从 src 中提取可能的文件路径
+        // 但这通常不会成功，因为我们已经处理了所有已知的格式
       }
       
       // 如果图片已经有正确的 src（比如已经是有效的 Blob URL 或 asset URL），不需要重新处理
@@ -312,7 +446,26 @@ function Note({ noteId }: NoteProps) {
           originalOnError.call(img, e);
         }
       };
+      } catch (error) {
+        // 如果处理某个图片时出错，记录错误但继续处理其他图片
+        console.error(`[修复图片] 处理图片时出错:`, error);
+        // 确保即使出错，图片也有基本的样式和事件处理
+        if (!img.classList.contains('note-image')) {
+          img.className = 'note-image';
+        }
+        img.style.maxWidth = "100%";
+        img.style.borderRadius = "4px";
+        img.style.margin = "0";
+        img.style.cursor = "pointer";
+        img.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setImageToDelete(img);
+          setShowDeleteImageConfirm(true);
+        };
+      }
     }
+    console.log(`[修复图片] 完成修复图片，共处理 ${images.length} 张`);
   }, []);
 
   // 加载便签数据
@@ -341,11 +494,27 @@ function Note({ noteId }: NoteProps) {
           
           // 异步修复图片路径，不阻塞内容显示
           // 使用 setTimeout 让浏览器有机会先渲染内容
-          setTimeout(() => {
-            fixSavedImages().catch(err => {
-              console.error("修复图片路径时出错:", err);
-            });
-          }, 0);
+          // 在 release 模式下，需要等待更长时间，确保 DOM 完全加载
+          // 检查是否是 release 模式
+          const isDevMode = window.location.href.includes('localhost') || window.location.href.includes('127.0.0.1');
+          const isReleaseMode = !isDevMode;
+          const delay = isReleaseMode ? 300 : 100; // release 模式下延迟更长时间
+          console.log(`[加载便签] 运行模式: ${isReleaseMode ? 'RELEASE' : 'DEV'}, 延迟: ${delay}ms`);
+          
+          // 使用 requestAnimationFrame 确保在下一帧执行，避免阻塞 UI
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              console.log("[加载便签] 开始修复图片路径");
+              // 使用 Promise 包装，确保即使出错也不会阻塞
+              Promise.resolve().then(() => {
+                return fixSavedImages();
+              }).catch(err => {
+                console.error("修复图片路径时出错:", err);
+                // 即使出错，也确保 UI 可以正常使用
+                setIsLoaded(true);
+              });
+            }, delay);
+          });
         } else {
           setIsLoaded(true);
         }
@@ -401,13 +570,19 @@ function Note({ noteId }: NoteProps) {
     tempDiv.innerHTML = html;
     
     const images = tempDiv.querySelectorAll('img');
+    console.log(`[规范化路径] 处理 ${images.length} 张图片`);
+    
     images.forEach((img) => {
       const src = img.src;
+      const existingDataPath = img.getAttribute("data-image-path");
       
-      // 如果图片有 data-image-path，保持不变
-      if (img.getAttribute("data-image-path")) {
+      // 如果图片有 data-image-path，保持不变（这是最重要的，确保路径不丢失）
+      if (existingDataPath) {
+        console.log(`[规范化路径] 图片已有 data-image-path: ${existingDataPath}`);
         return;
       }
+      
+      console.log(`[规范化路径] 图片没有 data-image-path，src: ${src.substring(0, 100)}...`);
       
       // 如果图片路径是 Tauri URL，尝试提取原始路径
       if (src.includes('__tauri') || src.includes('localhost')) {
@@ -423,9 +598,33 @@ function Note({ noteId }: NoteProps) {
         const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
         img.setAttribute("data-image-path", normalizedPath);
       }
+      // 如果是 Blob URL，尝试从 data-image-path 获取路径（如果存在）
+      // 注意：Blob URL 在页面刷新后会失效，所以必须依赖 data-image-path
+      else if (src.startsWith('blob:')) {
+        // Blob URL 本身无法提取路径，必须依赖 data-image-path
+        // 如果这里没有 data-image-path，说明保存时丢失了，这是不应该的
+        // 但我们可以尝试从其他来源恢复（比如从 src 中提取，虽然通常不会成功）
+        console.warn("[规范化路径] 发现 Blob URL 但没有 data-image-path，路径可能丢失:", src);
+        // 尝试从其他属性或上下文恢复路径（虽然通常不会成功）
+        // 这里我们只能警告，因为 Blob URL 无法直接提取文件路径
+      }
+      // 如果是 asset:// URL 或 asset.localhost URL，尝试提取路径
+      else if (src.includes('asset://') || src.includes('asset.localhost')) {
+        // asset:// URL 格式：asset://localhost/path/to/file.jpg
+        // asset.localhost URL 格式：http://asset.localhost/path/to/file.jpg
+        let urlMatch = src.match(/asset:\/\/[^\/]+\/(.+)$/);
+        if (!urlMatch) {
+          urlMatch = src.match(/asset\.localhost[^\/]*\/(.+)$/);
+        }
+        if (urlMatch && urlMatch[1]) {
+          const decodedPath = decodeURIComponent(urlMatch[1]);
+          img.setAttribute("data-image-path", decodedPath);
+          console.log(`[规范化路径] 从 asset URL 提取路径: ${decodedPath}`);
+        }
+      }
       // 如果是 base64，不处理（不应该出现，因为我们已经移除了 base64 回退）
       else if (src.startsWith('data:')) {
-        console.warn("发现 base64 图片，这不应该发生");
+        console.warn("[规范化路径] 发现 base64 图片，这不应该发生");
       }
     });
     
