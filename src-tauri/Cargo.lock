@@ -309,8 +309,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fac4744fb15ae8337dc853fee7fb3f4e48c0fbaa23d0afe49c447b4fab126118"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link 0.2.1",
 ]
 
@@ -4437,9 +4439,10 @@ checksum = "562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb"
 
 [[package]]
 name = "uni-pin"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.21.7",
+ "chrono",
  "dirs 5.0.1",
  "image",
  "reqwest 0.11.27",

@@ -147,6 +147,43 @@ pub fn get_store_path() -> PathBuf {
     get_data_dir().join("notes.json")
 }
 
+/// 获取日志文件路径
+pub fn get_log_path() -> PathBuf {
+    get_data_dir().join("app.log")
+}
+
+/// 写入日志到文件
+pub fn write_log(message: &str) {
+    use std::io::Write;
+    use std::fs::OpenOptions;
+    
+    // 确保数据目录存在
+    let data_dir = get_data_dir();
+    if !data_dir.exists() {
+        if let Err(e) = fs::create_dir_all(&data_dir) {
+            eprintln!("创建数据目录失败: {} (路径: {})", e, data_dir.display());
+            return;
+        }
+    }
+    
+    let log_path = get_log_path();
+    match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(mut file) => {
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            if let Err(e) = writeln!(file, "[{}] {}", timestamp, message) {
+                eprintln!("写入日志内容失败: {} (文件: {})", e, log_path.display());
+            }
+        }
+        Err(e) => {
+            eprintln!("打开日志文件失败: {} (路径: {})", e, log_path.display());
+        }
+    }
+}
+
 /// 从文件加载便签数据
 pub fn load_notes() -> NotesStore {
     let path = get_store_path();
