@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import ConfirmDialog from "./ConfirmDialog";
 import { useI18n } from "../hooks/useI18n";
+// logger 在 main.tsx 中导入以初始化日志系统，这里不需要导入
 
 // 预定义的便签颜色主题
 const NOTE_THEMES = [
@@ -24,6 +25,7 @@ interface NoteData {
   closed: boolean;
   opacity: number;
   always_on_top: boolean;
+  created_at?: number; // 创建时间戳（秒）
 }
 
 interface NoteProps {
@@ -47,6 +49,8 @@ function Note({ noteId }: NoteProps) {
   const [showToolbar, setShowToolbar] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isHovering, setIsHovering] = useState(false);
+  const [autoShowToolbar, setAutoShowToolbar] = useState(false); // 菜单栏自动显示模式
+  const [isFocused, setIsFocused] = useState(false); // 便签是否获得焦点
   
   const contentRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -57,15 +61,56 @@ function Note({ noteId }: NoteProps) {
 
   const theme = NOTE_THEMES[themeIndex];
 
+  // 加载菜单栏显示模式设置，并监听设置变化事件
+  useEffect(() => {
+    const loadToolbarSetting = async () => {
+      try {
+        const setting = await invoke<boolean>("get_auto_show_toolbar");
+        setAutoShowToolbar(setting);
+      } catch (e) {
+        console.error("加载菜单栏显示模式设置失败:", e);
+      }
+    };
+    
+    // 立即加载一次
+    loadToolbarSetting();
+    
+    // 监听设置变化事件（从管理器窗口触发）
+    const handleToolbarSettingChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ autoShow: boolean }>;
+      if (customEvent.detail) {
+        setAutoShowToolbar(customEvent.detail.autoShow);
+        console.log("菜单栏显示模式设置已更新:", customEvent.detail.autoShow);
+      }
+    };
+    window.addEventListener("toolbarSettingChanged", handleToolbarSettingChanged);
+    
+    // 定期检查设置变化作为备用（每3秒检查一次，防止事件系统失效）
+    const interval = setInterval(loadToolbarSetting, 3000);
+    
+    return () => {
+      window.removeEventListener("toolbarSettingChanged", handleToolbarSettingChanged);
+      clearInterval(interval);
+    };
+  }, []);
+
   // 工具栏显示逻辑
   useEffect(() => {
-    if (isEditing || isHovering) {
+    // 如果启用了自动显示模式，鼠标悬停或编辑时显示
+    // 如果未启用，只有编辑时显示（通过单击获取焦点）
+    // 但首次加载时总是显示（由首次加载 useEffect 控制隐藏）
+    const shouldShow = autoShowToolbar 
+      ? (isEditing || isHovering || isFocused)
+      : (isEditing || isFocused);
+    
+    if (shouldShow) {
       setShowToolbar(true);
       if (toolbarHideTimeoutRef.current) {
         clearTimeout(toolbarHideTimeoutRef.current);
         toolbarHideTimeoutRef.current = null;
       }
-    } else {
+    } else if (isLoaded) {
+      // 只有在已加载后才开始隐藏倒计时
       toolbarHideTimeoutRef.current = setTimeout(() => {
         setShowToolbar(false);
         setShowOpacitySlider(false);
@@ -77,54 +122,232 @@ function Note({ noteId }: NoteProps) {
         clearTimeout(toolbarHideTimeoutRef.current);
       }
     };
-  }, [isEditing, isHovering]);
+  }, [isEditing, isHovering, isFocused, autoShowToolbar, isLoaded]);
 
-  // 首次加载显示工具栏，2秒后自动隐藏
+  // 当失去焦点时，自动隐藏工具栏（无论哪种模式）
   useEffect(() => {
-    if (isLoaded) {
+    if (!isFocused && !isEditing && !isHovering && isLoaded) {
       const timer = setTimeout(() => {
-        if (!isEditing && !isHovering) {
+        setShowToolbar(false);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [isFocused, isEditing, isHovering, isLoaded]);
+
+  // 首次加载显示工具栏，2秒后自动隐藏（仅在未启用自动显示模式时）
+  useEffect(() => {
+    if (isLoaded && !autoShowToolbar) {
+      const timer = setTimeout(() => {
+        if (!isEditing && !isHovering && !isFocused) {
           setShowToolbar(false);
         }
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [isLoaded]);
+  }, [isLoaded, autoShowToolbar, isEditing, isHovering, isFocused]);
 
   // 修复已保存图片的路径并绑定点击事件
-  const fixSavedImages = useCallback(() => {
-    if (!contentRef.current) return;
+  const fixSavedImages = useCallback(async () => {
+    if (!contentRef.current) {
+      console.log("[修复图片] contentRef.current 为空，跳过");
+      return;
+    }
     
     const images = contentRef.current.querySelectorAll('img');
-    images.forEach((img) => {
+    console.log(`[修复图片] 开始修复图片，共 ${images.length} 张`);
+    
+    if (images.length === 0) {
+      console.log("[修复图片] 没有图片需要修复");
+      return;
+    }
+    
+    // 使用 for 循环串行处理，但添加错误处理确保单个图片失败不会阻塞其他图片
+    for (const img of Array.from(images)) {
+      try {
       // 检查图片路径是否需要转换
       const src = img.src;
-      const dataPath = img.getAttribute("data-image-path");
+      let dataPath = img.getAttribute("data-image-path");
+      
+      console.log(`[修复图片] 处理图片 - src: ${src.substring(0, 100)}..., data-image-path: ${dataPath || '无'}`);
+      
+      // 辅助函数：从文件路径创建 Blob URL
+      // 在生产环境中，直接使用 Tauri 命令读取文件，确保兼容性
+      const createBlobUrlFromPath = async (filePath: string): Promise<string | null> => {
+        try {
+          console.log(`[修复图片] 从文件路径创建 Blob URL: ${filePath}`);
+          
+          // 规范化路径（处理 Windows 路径格式）
+          let normalizedPath = filePath;
+          // 如果路径包含反斜杠，转换为正斜杠（但保留 Windows 驱动器字母）
+          if (normalizedPath.includes('\\')) {
+            normalizedPath = normalizedPath.replace(/\\/g, '/');
+            // 如果路径是 Windows 绝对路径（如 C:/path），确保格式正确
+            if (normalizedPath.match(/^[A-Za-z]:\//)) {
+              // Windows 绝对路径，保持不变
+            } else if (normalizedPath.startsWith('/')) {
+              // Unix 风格路径，可能需要移除开头的斜杠（如果路径是 C:/path 格式）
+              // 但这里我们保持原样
+            }
+          }
+          
+          // 添加超时机制，防止读取文件时间过长导致卡住
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('读取文件超时')), 10000); // 10秒超时
+          });
+          
+          // 直接使用 Tauri 命令读取文件并创建 Blob URL
+          // 这样可以确保在开发和生产环境中都能正常工作
+          try {
+            // 尝试使用原始路径
+            let base64DataUrl: string;
+            try {
+              base64DataUrl = await Promise.race([
+                invoke<string>("read_image_file", { filePath: filePath }),
+                timeoutPromise
+              ]);
+            } catch (e1) {
+              // 如果原始路径失败，尝试使用规范化路径
+              console.log(`[修复图片] 原始路径失败，尝试规范化路径: ${normalizedPath}`);
+              try {
+                base64DataUrl = await Promise.race([
+                  invoke<string>("read_image_file", { filePath: normalizedPath }),
+                  timeoutPromise
+                ]);
+              } catch (e2) {
+                throw e2; // 重新抛出错误
+              }
+            }
+            
+            console.log(`[修复图片] ✓ 成功读取文件，base64 长度: ${base64DataUrl.length}`);
+            
+            // 将 base64 数据 URL 转为 Blob（不用 fetch，Tauri WebView 下 fetch(data:) 会 Failed to fetch）
+            const parts = base64DataUrl.split(",");
+            if (parts.length !== 2) {
+              throw new Error("无效的 base64 数据格式");
+            }
+            const mimeMatch = parts[0].match(/data:([^;]+)/);
+            const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+            const binaryString = atob(parts[1]);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+              bytes[i] = binaryString.charCodeAt(i);
+            }
+            const blob = new Blob([bytes], { type: mimeType });
+            const blobUrl = URL.createObjectURL(blob);
+            console.log(`[修复图片] ✓ 成功创建 Blob URL: ${blobUrl}`);
+            return blobUrl;
+          } catch (readError) {
+            console.error(`[修复图片] ✗ 读取文件失败: ${readError}`);
+            // 如果读取失败，尝试使用 convertFileSrc（作为最后的回退）
+            try {
+              const convertedUrl = convertFileSrc(normalizedPath);
+              console.log(`[修复图片] 使用 convertFileSrc URL: ${convertedUrl}`);
+              return convertedUrl;
+            } catch (e2) {
+              console.error(`[修复图片] ✗ convertFileSrc 也失败: ${e2}`);
+              return null;
+            }
+          }
+        } catch (e) {
+          console.error("[修复图片] 转换路径失败:", e);
+          return null;
+        }
+      };
       
       // 优先使用 data-image-path 属性（如果存在）
       if (dataPath) {
-        try {
-          // 规范化路径：将 Windows 反斜杠转换为正斜杠
-          const normalizedDataPath = dataPath.replace(/\\/g, '/');
-          img.src = convertFileSrc(normalizedDataPath);
-          return; // 已处理，继续下一个
-        } catch (e) {
-          console.error("转换图片路径失败:", e);
+        console.log(`[修复图片] 发现 data-image-path: ${dataPath}`);
+        console.log(`[修复图片] 当前 src: ${src}`);
+        console.log(`[修复图片] 图片状态: complete=${img.complete}, naturalWidth=${img.naturalWidth}, naturalHeight=${img.naturalHeight}`);
+        
+        // 检查是否是 release 模式
+        // 在 release 模式下，window.location.href 不包含 localhost
+        // 或者可以通过检查是否有 dev server 来判断
+        const isDevMode = window.location.href.includes('localhost') || window.location.href.includes('127.0.0.1');
+        const isReleaseMode = !isDevMode;
+        
+        console.log(`[修复图片] 运行模式: ${isReleaseMode ? 'RELEASE' : 'DEV'}`);
+        
+        // 在 release 模式下，总是通过 read_image_file 重新创建 Blob URL
+        // 这样可以避免 asset:// URL 在 release 模式下无法工作的问题
+        // 即使图片看起来已经加载成功，也重新加载以确保兼容性
+        if (isReleaseMode) {
+          console.log("[修复图片] RELEASE 模式：强制重新加载图片");
+          const imageUrl = await createBlobUrlFromPath(dataPath);
+          if (imageUrl) {
+            img.src = imageUrl;
+            // 确保 data-image-path 属性被保留
+            if (!img.getAttribute("data-image-path")) {
+              img.setAttribute("data-image-path", dataPath);
+            }
+            // 如果是 Blob URL，设置标记
+            if (imageUrl.startsWith('blob:')) {
+              img.setAttribute("data-use-blob", "true");
+            }
+            console.log(`[修复图片] ✓ 图片 URL 已更新: ${imageUrl.substring(0, 100)}...`);
+          } else {
+            console.error(`[修复图片] ✗ 无法创建图片 URL，文件路径: ${dataPath}`);
+          }
+        } else {
+          // 在开发模式下，检查是否需要重新加载
+          const needsReload = 
+            // 如果当前是 Blob URL，需要重新加载（因为 Blob URL 在页面刷新后失效）
+            src.startsWith('blob:') ||
+            // 如果图片加载失败，需要重新加载
+            !img.complete ||
+            img.naturalWidth === 0 ||
+            // 如果是 asset URL，需要重新加载
+            src.includes('asset://') ||
+            src.includes('asset.localhost') ||
+            // 如果是空的或无效的 src，需要重新加载（页面刚加载时）
+            !src || src === 'about:blank' ||
+            // 如果是 file:// URL，需要重新加载
+            src.startsWith('file://');
+          
+          if (needsReload) {
+            console.log("[修复图片] DEV 模式：需要重新加载图片");
+            const imageUrl = await createBlobUrlFromPath(dataPath);
+            if (imageUrl) {
+              img.src = imageUrl;
+              // 确保 data-image-path 属性被保留
+              if (!img.getAttribute("data-image-path")) {
+                img.setAttribute("data-image-path", dataPath);
+              }
+              // 如果是 Blob URL，设置标记
+              if (imageUrl.startsWith('blob:')) {
+                img.setAttribute("data-use-blob", "true");
+              }
+              console.log(`[修复图片] ✓ 图片 URL 已更新: ${imageUrl.substring(0, 100)}...`);
+            } else {
+              console.error(`[修复图片] ✗ 无法创建图片 URL，文件路径: ${dataPath}`);
+            }
+          } else {
+            // 在开发模式下，如果图片已经加载成功，可以跳过重新加载
+            // 但确保 data-image-path 属性存在
+            console.log("[修复图片] DEV 模式：图片已经有效，跳过重新加载");
+            if (!img.getAttribute("data-image-path")) {
+              img.setAttribute("data-image-path", dataPath);
+            }
+          }
         }
       }
-      
       // 如果图片路径是 file:// 开头的，需要转换为 convertFileSrc
-      if (src.startsWith('file://')) {
+      else if (src.startsWith('file://')) {
         try {
           // 提取原始文件路径（去除 file:// 前缀）
           const filePath = src.replace(/^file:\/\/\//, '').replace(/^file:\/\//, '');
           // 在 Windows 上，路径可能包含驱动器字母，需要特殊处理
           const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-          img.src = convertFileSrc(normalizedPath);
+          const blobUrl = await createBlobUrlFromPath(normalizedPath);
+          if (blobUrl) {
+            img.src = blobUrl;
+          } else {
+            img.src = convertFileSrc(normalizedPath);
+          }
           // 保存原始路径到 data 属性
           img.setAttribute("data-image-path", normalizedPath);
         } catch (e) {
-          console.error("转换图片路径失败:", e);
+          console.error("[修复图片] 转换 file:// 路径失败:", e);
         }
       }
       // 如果图片路径是 Tauri 临时 URL（http://localhost），尝试从 src 提取路径
@@ -137,28 +360,112 @@ function Note({ noteId }: NoteProps) {
         if (urlMatch && urlMatch[1]) {
           // 解码路径
           const decodedPath = decodeURIComponent(urlMatch[1]);
-          try {
-            img.src = convertFileSrc(decodedPath);
-            img.setAttribute("data-image-path", decodedPath);
-          } catch (e) {
-            console.error("从 Tauri URL 提取路径失败:", e);
+          const blobUrl = await createBlobUrlFromPath(decodedPath);
+          if (blobUrl) {
+            img.src = blobUrl;
+            img.setAttribute("data-use-blob", "true");
+          } else {
+            try {
+              img.src = convertFileSrc(decodedPath);
+            } catch (e) {
+              console.error("[修复图片] 从 Tauri URL 提取路径失败:", e);
+            }
           }
+          img.setAttribute("data-image-path", decodedPath);
         }
       }
+      // 如果图片是 Blob URL 但没有 data-image-path，无法修复
+      else if (src.startsWith('blob:')) {
+        console.warn("[修复图片] 发现 Blob URL 但没有 data-image-path，无法修复:", src);
+        // 即使无法修复，也要确保图片有正确的样式和点击事件
+      }
+      // 如果图片 src 为空或无效，且没有 data-image-path，无法修复
+      else if (!src || src === 'about:blank' || src.trim() === '') {
+        console.warn("[修复图片] 发现无效的图片 src，且没有 data-image-path，无法修复:", src);
+      }
+      // 如果图片是其他格式的 URL（比如 http://, https://），不需要处理
+      else if (src.startsWith('http://') || src.startsWith('https://')) {
+        console.log("[修复图片] 发现网络图片 URL，跳过处理:", src);
+      }
+      // 如果图片是其他未知格式，尝试检查是否需要处理
+      else {
+        console.warn("[修复图片] 发现未知格式的图片 URL，且没有 data-image-path:", src);
+        // 尝试从 src 中提取可能的文件路径
+        // 但这通常不会成功，因为我们已经处理了所有已知的格式
+      }
       
-      // 为图片添加样式和点击事件
+      // 如果图片已经有正确的 src（比如已经是有效的 Blob URL 或 asset URL），不需要重新处理
+      // 但需要确保图片有正确的样式和点击事件
+      
+      // 为图片添加样式（无论是否已经有 note-image class）
+      // 确保图片有正确的样式
       if (!img.classList.contains('note-image')) {
         img.className = 'note-image';
+      }
+      img.style.maxWidth = "100%";
+      img.style.borderRadius = "4px";
+      img.style.margin = "0";
+      img.style.cursor = "pointer"; // 改为 pointer，表示可点击
+      
+      // 添加点击事件：点击图片弹出删除提示框
+      // 移除旧的事件监听器（如果存在），避免重复绑定
+      img.onclick = null; // 清除旧的事件监听器
+      img.onclick = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        console.log('[图片点击] 点击图片，弹出删除提示框');
+        setImageToDelete(img);
+        setShowDeleteImageConfirm(true);
+      };
+      
+      // 添加加载成功和失败的日志
+      const originalOnLoad = img.onload;
+      img.onload = (e) => {
+        console.log(`[修复图片] ✓ 图片加载成功: ${img.src.substring(0, 100)}...`);
+        if (originalOnLoad) {
+          originalOnLoad.call(img, e);
+        }
+      };
+      
+      const originalOnError = img.onerror;
+      img.onerror = async (e) => {
+        console.error(`[修复图片] ✗ 图片加载失败: ${img.src.substring(0, 100)}...`);
+        // 如果有 data-image-path，尝试使用 Blob URL 回退
+        const imagePath = img.getAttribute("data-image-path");
+        if (imagePath && !img.src.startsWith('blob:')) {
+          console.log("[修复图片] 尝试使用 Blob URL 回退");
+          const blobUrl = await createBlobUrlFromPath(imagePath);
+          if (blobUrl && blobUrl !== img.src) {
+            img.src = blobUrl;
+            img.setAttribute("data-use-blob", "true");
+            // 移除错误处理，避免循环
+            img.onerror = null;
+          }
+        }
+        if (originalOnError) {
+          originalOnError.call(img, e);
+        }
+      };
+      } catch (error) {
+        // 如果处理某个图片时出错，记录错误但继续处理其他图片
+        console.error(`[修复图片] 处理图片时出错:`, error);
+        // 确保即使出错，图片也有基本的样式和事件处理
+        if (!img.classList.contains('note-image')) {
+          img.className = 'note-image';
+        }
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
-        img.style.margin = "8px 0";
+        img.style.margin = "0";
         img.style.cursor = "pointer";
-        img.onclick = () => {
+        img.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
           setImageToDelete(img);
           setShowDeleteImageConfirm(true);
         };
       }
-    });
+    }
+    console.log(`[修复图片] 完成修复图片，共处理 ${images.length} 张`);
   }, []);
 
   // 加载便签数据
@@ -167,9 +474,12 @@ function Note({ noteId }: NoteProps) {
       try {
         const data = await invoke<NoteData | null>("get_note", { id: noteId });
         if (data && contentRef.current) {
+          // 先设置内容，立即显示
           contentRef.current.innerHTML = data.content || "";
-          // 修复已保存图片的路径
-          fixSavedImages();
+          // 立即设置 isLoaded，让内容先显示，不等待图片加载
+          setIsLoaded(true);
+          
+          // 设置主题和其他属性
           setThemeIndex(data.theme_index || 0);
           setOpacity(data.opacity || 0);
           setAlwaysOnTop(data.always_on_top === true);
@@ -181,15 +491,71 @@ function Note({ noteId }: NoteProps) {
             const appWindow = getCurrentWindow();
             appWindow.setAlwaysOnTop(false).catch(console.error);
           }
+          
+          // 异步修复图片路径，不阻塞内容显示
+          // 使用 setTimeout 让浏览器有机会先渲染内容
+          // 在 release 模式下，需要等待更长时间，确保 DOM 完全加载
+          // 检查是否是 release 模式
+          const isDevMode = window.location.href.includes('localhost') || window.location.href.includes('127.0.0.1');
+          const isReleaseMode = !isDevMode;
+          const delay = isReleaseMode ? 300 : 100; // release 模式下延迟更长时间
+          console.log(`[加载便签] 运行模式: ${isReleaseMode ? 'RELEASE' : 'DEV'}, 延迟: ${delay}ms`);
+          
+          // 使用 requestAnimationFrame 确保在下一帧执行，避免阻塞 UI
+          requestAnimationFrame(() => {
+            setTimeout(() => {
+              console.log("[加载便签] 开始修复图片路径");
+              // 使用 Promise 包装，确保即使出错也不会阻塞
+              Promise.resolve().then(() => {
+                return fixSavedImages();
+              }).catch(err => {
+                console.error("修复图片路径时出错:", err);
+                // 即使出错，也确保 UI 可以正常使用
+                setIsLoaded(true);
+              });
+            }, delay);
+          });
+        } else {
+          setIsLoaded(true);
         }
-        setIsLoaded(true);
-        await invoke("show_note_window", { id: noteId });
+        
+        // 窗口在创建时已经根据 closed 状态决定是否显示
+        // 这里只需要确保窗口可见（如果数据中 closed 为 false）
+        if (data && !data.closed) {
+          try {
+            await invoke("show_note_window", { id: noteId });
+            
+            // 检查是否是新创建的便签（创建时间在最近5秒内）
+            const isNewNote = data.created_at && (Date.now() / 1000 - data.created_at) < 5;
+            
+            // 只有新创建的便签才自动focus内容区域
+            if (isNewNote) {
+              setTimeout(() => {
+                if (contentRef.current) {
+                  contentRef.current.focus();
+                }
+              }, 150);
+            }
+          } catch (e) {
+            console.warn("显示窗口失败（可能已经显示）:", e);
+          }
+        } else if (!data) {
+          // 如果是新创建的便签（data为null），自动focus
+          setTimeout(() => {
+            if (contentRef.current) {
+              contentRef.current.focus();
+            }
+          }, 150);
+        }
       } catch (e) {
         console.error("加载便签数据失败:", e);
         setIsLoaded(true);
+        // 即使加载失败，也尝试显示窗口
         try {
           await invoke("show_note_window", { id: noteId });
-        } catch {}
+        } catch (err) {
+          console.warn("显示窗口失败:", err);
+        }
       }
     };
     loadNoteAndShow();
@@ -204,13 +570,19 @@ function Note({ noteId }: NoteProps) {
     tempDiv.innerHTML = html;
     
     const images = tempDiv.querySelectorAll('img');
+    console.log(`[规范化路径] 处理 ${images.length} 张图片`);
+    
     images.forEach((img) => {
       const src = img.src;
+      const existingDataPath = img.getAttribute("data-image-path");
       
-      // 如果图片有 data-image-path，保持不变
-      if (img.getAttribute("data-image-path")) {
+      // 如果图片有 data-image-path，保持不变（这是最重要的，确保路径不丢失）
+      if (existingDataPath) {
+        console.log(`[规范化路径] 图片已有 data-image-path: ${existingDataPath}`);
         return;
       }
+      
+      console.log(`[规范化路径] 图片没有 data-image-path，src: ${src.substring(0, 100)}...`);
       
       // 如果图片路径是 Tauri URL，尝试提取原始路径
       if (src.includes('__tauri') || src.includes('localhost')) {
@@ -226,9 +598,33 @@ function Note({ noteId }: NoteProps) {
         const normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
         img.setAttribute("data-image-path", normalizedPath);
       }
+      // 如果是 Blob URL，尝试从 data-image-path 获取路径（如果存在）
+      // 注意：Blob URL 在页面刷新后会失效，所以必须依赖 data-image-path
+      else if (src.startsWith('blob:')) {
+        // Blob URL 本身无法提取路径，必须依赖 data-image-path
+        // 如果这里没有 data-image-path，说明保存时丢失了，这是不应该的
+        // 但我们可以尝试从其他来源恢复（比如从 src 中提取，虽然通常不会成功）
+        console.warn("[规范化路径] 发现 Blob URL 但没有 data-image-path，路径可能丢失:", src);
+        // 尝试从其他属性或上下文恢复路径（虽然通常不会成功）
+        // 这里我们只能警告，因为 Blob URL 无法直接提取文件路径
+      }
+      // 如果是 asset:// URL 或 asset.localhost URL，尝试提取路径
+      else if (src.includes('asset://') || src.includes('asset.localhost')) {
+        // asset:// URL 格式：asset://localhost/path/to/file.jpg
+        // asset.localhost URL 格式：http://asset.localhost/path/to/file.jpg
+        let urlMatch = src.match(/asset:\/\/[^\/]+\/(.+)$/);
+        if (!urlMatch) {
+          urlMatch = src.match(/asset\.localhost[^\/]*\/(.+)$/);
+        }
+        if (urlMatch && urlMatch[1]) {
+          const decodedPath = decodeURIComponent(urlMatch[1]);
+          img.setAttribute("data-image-path", decodedPath);
+          console.log(`[规范化路径] 从 asset URL 提取路径: ${decodedPath}`);
+        }
+      }
       // 如果是 base64，不处理（不应该出现，因为我们已经移除了 base64 回退）
       else if (src.startsWith('data:')) {
-        console.warn("发现 base64 图片，这不应该发生");
+        console.warn("[规范化路径] 发现 base64 图片，这不应该发生");
       }
     });
     
@@ -517,8 +913,18 @@ function Note({ noteId }: NoteProps) {
         img.className = "note-image";
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
-        img.style.margin = "8px 0";
-        img.style.cursor = "pointer";
+        img.style.margin = "0";
+        img.style.cursor = "pointer"; // 改为 pointer，表示可点击
+        
+        // 添加点击事件：点击图片弹出删除提示框
+        img.onclick = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          console.log('[图片点击] 点击图片，弹出删除提示框');
+          setImageToDelete(img);
+          setShowDeleteImageConfirm(true);
+        };
+        
         img.onload = () => {
           console.log("[插入图片] ✓ 图片元素加载成功");
         };
@@ -536,10 +942,6 @@ function Note({ noteId }: NoteProps) {
               console.error("[插入图片] ✗ Blob URL 创建也失败:", e);
             }
           }
-        };
-        img.onclick = () => {
-          setImageToDelete(img);
-          setShowDeleteImageConfirm(true);
         };
 
         const selection = window.getSelection();
@@ -577,6 +979,7 @@ function Note({ noteId }: NoteProps) {
   // 确认删除图片
   const confirmDeleteImage = () => {
     if (imageToDelete) {
+      // 直接删除图片元素
       imageToDelete.remove();
       handleContentChange();
     }
@@ -661,10 +1064,13 @@ function Note({ noteId }: NoteProps) {
   // 编辑状态处理
   const handleContentFocus = () => {
     setIsEditing(true);
+    setIsFocused(true);
   };
 
   const handleContentBlur = () => {
+    // 同步清除编辑状态和焦点状态，确保状态一致性
     setIsEditing(false);
+    setIsFocused(false);
     handleContentChange();
   };
 
@@ -678,6 +1084,27 @@ function Note({ noteId }: NoteProps) {
     setShowOpacitySlider(false);
   };
 
+  // 单击便签容器获取焦点（用于非自动显示模式）
+  const handleContainerClick = (e: React.MouseEvent) => {
+    // 如果点击的不是内容区域或工具栏按钮，让内容区域获取焦点
+    const target = e.target as HTMLElement;
+    // 如果点击的是图片，不需要处理（图片点击由图片自己的事件处理）
+    if (target.tagName === 'IMG' || target.closest('img')) {
+      return;
+    }
+    // 如果点击的是内容区域本身，不需要处理（内容区域的点击会触发 focus）
+    if (target === contentRef.current || target.closest('.note-content')) {
+      return;
+    }
+    if (target === containerRef.current || 
+        (target.closest('.note-header') && !target.closest('.note-toolbar') && !target.closest('button'))) {
+      // 只调用 focus()，让 handleContentFocus 统一处理状态更新
+      if (contentRef.current) {
+        contentRef.current.focus();
+      }
+    }
+  };
+
   // 计算实际的背景透明度
   const bgOpacity = (100 - opacity) / 100;
 
@@ -689,6 +1116,7 @@ function Note({ noteId }: NoteProps) {
         onContextMenu={handleContextMenu}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onClick={handleContainerClick}
         style={{
           "--note-bg": theme.bg,
           "--note-header": theme.header,
@@ -764,7 +1192,7 @@ function Note({ noteId }: NoteProps) {
 
         <div
           ref={contentRef}
-          className="note-content"
+          className={`note-content ${isEditing ? 'editing' : 'not-editing'} ${showToolbar ? 'toolbar-visible' : 'toolbar-hidden'}`}
           contentEditable
           onPaste={handlePaste}
           onInput={handleContentChange}

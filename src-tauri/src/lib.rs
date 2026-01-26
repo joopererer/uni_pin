@@ -1,7 +1,7 @@
 mod note_store;
 pub mod updater;
 
-use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir};
+use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir, write_log as write_log_file, get_log_path as get_log_file_path};
 use updater::check_for_updates;
 use tauri::{
     image::Image,
@@ -22,14 +22,15 @@ fn generate_window_label() -> String {
 
 /// 创建一个新的便签窗口（内部使用）
 fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) -> Result<String, String> {
-    let (window_label, position, size, always_on_top) = match note_data {
+    let (window_label, position, size, always_on_top, should_show) = match note_data {
         Some(data) => (
             data.id.clone(),
             Some((data.position.x, data.position.y)),
             (data.size.width, data.size.height),
             data.always_on_top,
+            !data.closed, // 如果便签状态是未关闭，应该显示
         ),
-        None => (generate_window_label(), None, (280.0, 320.0), false), // 默认不置顶
+        None => (generate_window_label(), None, (280.0, 320.0), false, true), // 新创建的便签默认显示
     };
 
     let mut builder = WebviewWindowBuilder::new(
@@ -45,8 +46,8 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
     .always_on_top(always_on_top)
     .skip_taskbar(true)
     .resizable(true)
-    .visible(false)
-    .focused(true);
+    .visible(should_show) // 根据便签状态决定是否显示
+    .focused(should_show); // 如果需要显示，也聚焦
 
     if let Some((x, y)) = position {
         builder = builder.position(x, y);
@@ -66,7 +67,7 @@ fn create_note_window_internal(app: &AppHandle, note_data: Option<&NoteData>) ->
         }
     }
 
-    println!("📝 创建便签窗口: {}", window_label);
+    println!("📝 创建便签窗口: {} (显示: {})", window_label, should_show);
     Ok(window_label)
 }
 
@@ -257,15 +258,29 @@ fn show_note(app: AppHandle, state: State<'_, NoteStoreState>, id: String) -> Re
     
     // 检查窗口是否存在
     if let Some(window) = app.get_webview_window(&id) {
+        // 窗口存在，直接显示
         window.show().map_err(|e| format!("显示窗口失败: {}", e))?;
         window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+        println!("✅ 显示便签窗口: {}", id);
     } else {
         // 窗口不存在，需要重新创建
+        println!("⚠️ 窗口不存在，重新创建: {}", id);
         let store = state.0.lock().unwrap();
         if let Some(note) = store.notes.get(&id) {
             let note_clone = note.clone();
             drop(store);
-            create_note_window_internal(&app, Some(&note_clone))?;
+            let window_label = create_note_window_internal(&app, Some(&note_clone))?;
+            // 创建后等待一小段时间再显示，确保窗口完全初始化
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            if let Some(window) = app.get_webview_window(&window_label) {
+                window.show().map_err(|e| format!("显示新创建的窗口失败: {}", e))?;
+                window.set_focus().map_err(|e| format!("聚焦窗口失败: {}", e))?;
+                println!("✅ 新窗口已显示: {}", window_label);
+            } else {
+                return Err(format!("窗口创建后立即查找失败: {}", window_label));
+            }
+        } else {
+            return Err(format!("便签数据不存在: {}", id));
         }
     }
     Ok(())
@@ -277,7 +292,12 @@ fn delete_note(
     state: State<'_, NoteStoreState>,
     id: String,
 ) -> Result<(), String> {
+    // 先移除焦点，避免关闭窗口后自动focus到其他窗口
     if let Some(window) = app.get_webview_window(&id) {
+        // 先隐藏窗口，这样关闭时不会触发焦点转移
+        let _ = window.hide();
+        // 等待一小段时间，确保窗口隐藏后再关闭
+        std::thread::sleep(std::time::Duration::from_millis(50));
         window.close().map_err(|e| format!("关闭窗口失败: {}", e))?;
     }
     
@@ -507,6 +527,74 @@ fn save_image(image_data: String) -> Result<String, String> {
     Ok(filepath.to_string_lossy().to_string())
 }
 
+/// 写入日志到文件（前端调用）
+#[tauri::command]
+fn write_log(message: String) -> Result<(), String> {
+    write_log_file(&message);
+    Ok(())
+}
+
+/// 获取日志文件路径（前端调用）
+#[tauri::command]
+fn get_log_path() -> Result<String, String> {
+    Ok(get_log_file_path().to_string_lossy().to_string())
+}
+
+/// 读取图片文件并返回 base64 数据（用于创建 Blob URL）
+#[tauri::command]
+fn read_image_file(file_path: String) -> Result<String, String> {
+    use std::fs;
+    use std::path::Path;
+    use base64::Engine;
+    
+    println!("[后端] read_image_file: 读取文件: {}", file_path);
+    
+    // 规范化路径：处理 Windows 路径格式
+    let path = Path::new(&file_path);
+    
+    // 检查文件是否存在
+    if !path.exists() {
+        return Err(format!("文件不存在: {}", file_path));
+    }
+    
+    // 检查是否是文件（不是目录）
+    if !path.is_file() {
+        return Err(format!("路径不是文件: {}", file_path));
+    }
+    
+    // 读取文件
+    let file_bytes = fs::read(&file_path)
+        .map_err(|e| format!("读取文件失败: {} (路径: {})", e, file_path))?;
+    
+    if file_bytes.is_empty() {
+        return Err(format!("文件为空: {}", file_path));
+    }
+    
+    println!("[后端] read_image_file: 成功读取文件，大小: {} 字节", file_bytes.len());
+    
+    // 转换为 base64
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&file_bytes);
+    
+    // 根据文件扩展名确定 MIME 类型
+    let mime_type = if let Some(ext) = path.extension() {
+        let ext_lower = ext.to_string_lossy().to_lowercase();
+        match ext_lower.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => "image/jpeg", // 默认
+        }
+    } else {
+        "image/jpeg" // 默认
+    };
+    
+    println!("[后端] read_image_file: MIME 类型: {}, base64 长度: {}", mime_type, base64_data.len());
+    
+    // 返回 data URL 格式
+    Ok(format!("data:{};base64,{}", mime_type, base64_data))
+}
+
 /// 获取自启动状态
 #[tauri::command]
 fn get_auto_start(app: AppHandle) -> Result<bool, String> {
@@ -535,6 +623,36 @@ fn set_language(state: State<'_, NoteStoreState>, language: String) -> Result<()
         save_notes(&store)?;
     }
     
+    Ok(())
+}
+
+/// 获取菜单栏自动显示模式
+#[tauri::command]
+fn get_auto_show_toolbar(state: State<'_, NoteStoreState>) -> bool {
+    let store = state.0.lock().unwrap();
+    store.settings.auto_show_toolbar
+}
+
+/// 设置菜单栏自动显示模式
+#[tauri::command]
+fn set_auto_show_toolbar(app: AppHandle, state: State<'_, NoteStoreState>, enabled: bool) -> Result<(), String> {
+    {
+        let mut store = state.0.lock().unwrap();
+        store.settings.auto_show_toolbar = enabled;
+        save_notes(&store)?;
+    }
+    
+    // 通知所有便签窗口设置已更改
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("note-") {
+            let _ = window.eval(&format!(
+                "window.dispatchEvent(new CustomEvent('toolbarSettingChanged', {{ detail: {{ autoShow: {} }} }}));",
+                enabled
+            ));
+        }
+    }
+    
+    println!("✅ 菜单栏自动显示模式已设置为: {}", enabled);
     Ok(())
 }
 
@@ -599,7 +717,9 @@ fn restore_saved_notes(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>
     let count = notes_to_restore.len();
     for note in notes_to_restore {
         match create_note_window_internal(app, Some(&note)) {
-            Ok(_) => {}
+            Ok(window_label) => {
+                println!("✅ 已恢复便签窗口: {} (应该已显示)", window_label);
+            }
             Err(e) => eprintln!("❌ 恢复便签 {} 失败: {}", note.id, e),
         }
     }
@@ -639,7 +759,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let about = MenuItem::with_id(app, "about", "ℹ️ 关于", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &about, &quit])?;
+    let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &quit])?;
 
     let png_bytes = include_bytes!("../icons/32x32.png");
     let img = image::load_from_memory(png_bytes).expect("Failed to load icon");
@@ -753,14 +873,23 @@ pub fn run() {
             get_window_size,
             get_all_note_windows,
             save_image,
+            read_image_file,
             get_clipboard_image,
             get_auto_start,
             set_auto_start,
             get_language,
             set_language,
-            check_update
+            get_auto_show_toolbar,
+            set_auto_show_toolbar,
+            check_update,
+            write_log,
+            get_log_path
         ])
         .setup(|app| {
+            // 测试日志系统是否正常工作
+            let log_path = get_log_file_path();
+            write_log_file(&format!("✨ UniPin 应用启动 - 日志系统测试 (日志文件路径: {})", log_path.display()));
+            
             restore_saved_notes(app.handle())?;
             setup_tray(app.handle())?;
             setup_global_shortcuts(app.handle())?;
@@ -776,6 +905,7 @@ pub fn run() {
                     match check_for_updates().await {
                         Ok(Some(release)) => {
                             println!("🆕 发现新版本: {}", release.tag_name);
+                            write_log_file(&format!("🆕 发现新版本: {}", release.tag_name));
                             // 可以发送事件到前端显示更新提示
                             if let Some(window) = app_handle.get_webview_window("manager") {
                                 let download_url = release.assets.first()
@@ -791,15 +921,18 @@ pub fn run() {
                         }
                         Ok(None) => {
                             println!("✅ 已是最新版本");
+                            write_log_file("✅ 已是最新版本");
                         }
                         Err(e) => {
                             println!("⚠️ 检查更新失败: {}", e);
+                            write_log_file(&format!("⚠️ 检查更新失败: {}", e));
                         }
                     }
                 });
             });
             
             println!("✨ UniPin 已启动！");
+            write_log_file("✨ UniPin 已启动！");
             Ok(())
         })
         .run(tauri::generate_context!())

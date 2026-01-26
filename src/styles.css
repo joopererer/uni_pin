@@ -241,6 +241,8 @@ body,
   width: 100%;
   height: 100%;
   padding: 12px 16px;
+  padding-right: 22px; /* 16px + 6px 滚动条宽度，让滚动条覆盖在内容上 */
+  margin-right: -6px; /* 负边距补偿滚动条宽度，避免内容被压缩 */
   overflow-y: auto;
   overflow-x: hidden;
   font-size: 14px;
@@ -249,11 +251,31 @@ body,
   outline: none;
   word-wrap: break-word;
   white-space: pre-wrap;
+  box-sizing: border-box;
+  /* 确保在编辑模式下，内容区域高度计算考虑工具栏高度 */
+  transition: padding-top 0.3s ease;
+  /* Firefox 滚动条默认隐藏（在失去焦点时） */
+}
+
+/* 内容区域根据工具栏状态调整上边距 */
+.note-content.toolbar-visible {
+  padding-top: 44px;
+}
+
+.note-content.toolbar-hidden {
+  padding-top: 12px;
 }
 
 /* 工具栏显示时内容区域有上边距 */
 .note-container.toolbar-visible .note-content {
   padding-top: 44px;
+  transition: padding-top 0.3s ease;
+}
+
+/* 工具栏隐藏时内容区域不需要上边距，自动调整位置 */
+.note-container.toolbar-hidden .note-content {
+  padding-top: 12px;
+  transition: padding-top 0.3s ease;
 }
 
 .note-content:empty::before {
@@ -268,12 +290,14 @@ body,
   background: rgba(0, 0, 0, 0.15);
 }
 
+/* 图片容器 */
+/* 移除 wrapper 样式，不再需要包装容器 */
+
 .note-content img,
 .note-image {
   max-width: 100%;
   height: auto;
   border-radius: 6px;
-  margin: 8px 0;
   display: block;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   transition: transform 0.2s, box-shadow 0.2s;
@@ -284,6 +308,8 @@ body,
   transform: scale(1.02);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
+
+/* 删除按钮样式已移除，改为点击图片弹出删除提示框 */
 
 /* ============ 调整大小指示器 ============ */
 .resize-indicator {
@@ -301,6 +327,7 @@ body,
 }
 
 /* ============ 滚动条样式 ============ */
+/* 滚动条覆盖在内容上，不占用宽度 */
 .note-content::-webkit-scrollbar {
   width: 6px;
 }
@@ -310,15 +337,52 @@ body,
   margin: 4px;
 }
 
+/* 默认显示滚动条（编辑模式或鼠标悬停时），使用便签主题色 */
 .note-content::-webkit-scrollbar-thumb {
   background: var(--note-text, #5d4037);
   opacity: 0.2;
   border-radius: 3px;
+  transition: opacity 0.3s ease;
 }
 
 .note-content::-webkit-scrollbar-thumb:hover {
   opacity: 0.4;
 }
+
+/* 编辑模式或鼠标悬停便签容器时显示滚动条 */
+.note-container:hover .note-content::-webkit-scrollbar-thumb,
+.note-content.editing::-webkit-scrollbar-thumb {
+  opacity: 0.2;
+}
+
+.note-container:hover .note-content::-webkit-scrollbar-thumb:hover,
+.note-content.editing::-webkit-scrollbar-thumb:hover {
+  opacity: 0.4;
+}
+
+/* 失去焦点时隐藏滚动条 */
+.note-content:not(.editing):not(:hover)::-webkit-scrollbar-thumb {
+  opacity: 0;
+}
+
+/* Firefox 滚动条显示 */
+.note-content {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 64, 55, 0.2) transparent; /* 使用便签主题色 */
+}
+
+.note-container:hover .note-content,
+.note-content.editing {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 64, 55, 0.2) transparent;
+}
+
+/* 失去焦点时隐藏 Firefox 滚动条 */
+.note-content:not(.editing):not(:hover) {
+  scrollbar-width: none;
+}
+
+
 
 .note-content a {
   color: var(--note-text, #5d4037);

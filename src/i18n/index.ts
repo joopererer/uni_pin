@@ -38,6 +38,7 @@ export interface Translations {
     language: string;
     languageSetting: string;
     settings: string;
+    autoShowToolbar: string;
   };
   // 便签
     note: {
@@ -137,6 +138,7 @@ const translations: Record<Language, Translations> = {
       autoStart: '开机自动启动',
       language: '语言',
       languageSetting: '界面语言',
+      autoShowToolbar: '菜单栏自动显示',
       settings: '设置',
     },
     note: {
@@ -230,6 +232,7 @@ const translations: Record<Language, Translations> = {
       autoStart: 'Start with system',
       language: 'Language',
       languageSetting: 'Interface Language',
+      autoShowToolbar: 'Auto-show toolbar',
       settings: 'Settings',
     },
     note: {

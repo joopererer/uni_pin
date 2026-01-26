@@ -85,6 +85,13 @@ pub struct AppSettings {
     /// 界面语言 (zh, en)
     #[serde(default = "default_language")]
     pub language: String,
+    /// 菜单栏自动显示模式 (true: 鼠标悬停显示, false: 需要单击显示)
+    #[serde(default = "default_auto_show_toolbar")]
+    pub auto_show_toolbar: bool,
+}
+
+fn default_auto_show_toolbar() -> bool {
+    false  // 默认关闭，需要单击显示
 }
 
 fn default_language() -> String {
@@ -96,6 +103,7 @@ impl Default for AppSettings {
         Self {
             auto_start: false,
             language: "zh".to_string(),
+            auto_show_toolbar: false,
         }
     }
 }
@@ -137,6 +145,43 @@ pub fn get_images_dir() -> PathBuf {
 /// 获取数据存储文件路径
 pub fn get_store_path() -> PathBuf {
     get_data_dir().join("notes.json")
+}
+
+/// 获取日志文件路径
+pub fn get_log_path() -> PathBuf {
+    get_data_dir().join("app.log")
+}
+
+/// 写入日志到文件
+pub fn write_log(message: &str) {
+    use std::io::Write;
+    use std::fs::OpenOptions;
+    
+    // 确保数据目录存在
+    let data_dir = get_data_dir();
+    if !data_dir.exists() {
+        if let Err(e) = fs::create_dir_all(&data_dir) {
+            eprintln!("创建数据目录失败: {} (路径: {})", e, data_dir.display());
+            return;
+        }
+    }
+    
+    let log_path = get_log_path();
+    match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(mut file) => {
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+            if let Err(e) = writeln!(file, "[{}] {}", timestamp, message) {
+                eprintln!("写入日志内容失败: {} (文件: {})", e, log_path.display());
+            }
+        }
+        Err(e) => {
+            eprintln!("打开日志文件失败: {} (路径: {})", e, log_path.display());
+        }
+    }
 }
 
 /// 从文件加载便签数据
