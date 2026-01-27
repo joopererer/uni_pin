@@ -413,6 +413,11 @@ function Note({ noteId }: NoteProps) {
       img.onclick = (e) => {
         e.stopPropagation();
         e.preventDefault();
+        // 第一次点击：如果内容区域尚未获得焦点，则先让便签获得焦点，仅显示菜单，不弹出删除对话框
+        if (contentRef.current && document.activeElement !== contentRef.current) {
+          contentRef.current.focus();
+          return;
+        }
         console.log('[图片点击] 点击图片，弹出删除提示框');
         setImageToDelete(img);
         setShowDeleteImageConfirm(true);
@@ -460,6 +465,10 @@ function Note({ noteId }: NoteProps) {
         img.onclick = (e) => {
           e.stopPropagation();
           e.preventDefault();
+          if (contentRef.current && document.activeElement !== contentRef.current) {
+            contentRef.current.focus();
+            return;
+          }
           setImageToDelete(img);
           setShowDeleteImageConfirm(true);
         };
