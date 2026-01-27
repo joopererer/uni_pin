@@ -1120,6 +1120,9 @@ function Note({ noteId }: NoteProps) {
         // 焦点真正离开便签
         setIsFocused(false);
         isFocusedRef.current = false; // 同步更新 ref
+        // 关闭右键菜单
+        setShowContextMenu(false);
+        setShowImageContextMenu(false);
       }
 
       handleContentChange();
@@ -1135,6 +1138,9 @@ function Note({ noteId }: NoteProps) {
       setIsEditing(false);
       setIsFocused(false);
       isFocusedRef.current = false; // 同步更新 ref
+      // 关闭右键菜单
+      setShowContextMenu(false);
+      setShowImageContextMenu(false);
     };
 
     window.addEventListener('blur', handleWindowBlur);
