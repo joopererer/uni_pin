@@ -44,6 +44,9 @@ function Note({ noteId }: NoteProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteImageConfirm, setShowDeleteImageConfirm] = useState(false);
   const [imageToDelete, setImageToDelete] = useState<HTMLImageElement | null>(null);
+  const [showImageContextMenu, setShowImageContextMenu] = useState(false);
+  const [imageContextMenuPos, setImageContextMenuPos] = useState({ x: 0, y: 0 });
+  const [imageContextMenuTarget, setImageContextMenuTarget] = useState<HTMLImageElement | null>(null);
   
   // 工具栏自动隐藏相关状态
   const [showToolbar, setShowToolbar] = useState(true);
@@ -58,6 +61,8 @@ function Note({ noteId }: NoteProps) {
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const opacityTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const toolbarHideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isFocusedRef = useRef(false); // 用于在图片点击事件中访问最新的焦点状态
+  const showToolbarRef = useRef(true); // 用于在图片点击事件中访问最新的工具栏显示状态
 
   const theme = NOTE_THEMES[themeIndex];
 
@@ -105,6 +110,7 @@ function Note({ noteId }: NoteProps) {
     
     if (shouldShow) {
       setShowToolbar(true);
+      showToolbarRef.current = true; // 同步更新 ref
       if (toolbarHideTimeoutRef.current) {
         clearTimeout(toolbarHideTimeoutRef.current);
         toolbarHideTimeoutRef.current = null;
@@ -113,6 +119,7 @@ function Note({ noteId }: NoteProps) {
       // 只有在已加载后才开始隐藏倒计时
       toolbarHideTimeoutRef.current = setTimeout(() => {
         setShowToolbar(false);
+        showToolbarRef.current = false; // 同步更新 ref
         setShowOpacitySlider(false);
       }, 1500);
     }
@@ -129,6 +136,7 @@ function Note({ noteId }: NoteProps) {
     if (!isFocused && !isEditing && !isHovering && isLoaded) {
       const timer = setTimeout(() => {
         setShowToolbar(false);
+        showToolbarRef.current = false; // 同步更新 ref
       }, 1500);
       return () => clearTimeout(timer);
     }
@@ -140,6 +148,7 @@ function Note({ noteId }: NoteProps) {
       const timer = setTimeout(() => {
         if (!isEditing && !isHovering && !isFocused) {
           setShowToolbar(false);
+          showToolbarRef.current = false; // 同步更新 ref
         }
       }, 2000);
       return () => clearTimeout(timer);
@@ -405,22 +414,19 @@ function Note({ noteId }: NoteProps) {
       img.style.maxWidth = "100%";
       img.style.borderRadius = "4px";
       img.style.margin = "0";
-      img.style.cursor = "pointer"; // 改为 pointer，表示可点击
+      img.style.cursor = "default"; // 改为 default，因为不再有单击事件
       
-      // 添加点击事件：点击图片弹出删除提示框
-      // 移除旧的事件监听器（如果存在），避免重复绑定
-      img.onclick = null; // 清除旧的事件监听器
-      img.onclick = (e) => {
+      // 移除旧的点击事件监听器
+      img.onclick = null;
+      
+      // 添加右键菜单事件：右键图片弹出菜单（包含删除选项）
+      img.oncontextmenu = (e) => {
         e.stopPropagation();
         e.preventDefault();
-        // 第一次点击：如果内容区域尚未获得焦点，则先让便签获得焦点，仅显示菜单，不弹出删除对话框
-        if (contentRef.current && document.activeElement !== contentRef.current) {
-          contentRef.current.focus();
-          return;
-        }
-        console.log('[图片点击] 点击图片，弹出删除提示框');
-        setImageToDelete(img);
-        setShowDeleteImageConfirm(true);
+        console.log('[图片右键] 右键图片，显示菜单');
+        setImageContextMenuPos({ x: e.clientX, y: e.clientY });
+        setImageContextMenuTarget(img);
+        setShowImageContextMenu(true);
       };
       
       // 添加加载成功和失败的日志
@@ -461,16 +467,14 @@ function Note({ noteId }: NoteProps) {
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
         img.style.margin = "0";
-        img.style.cursor = "pointer";
-        img.onclick = (e) => {
+        img.style.cursor = "default";
+        img.onclick = null;
+        img.oncontextmenu = (e) => {
           e.stopPropagation();
           e.preventDefault();
-          if (contentRef.current && document.activeElement !== contentRef.current) {
-            contentRef.current.focus();
-            return;
-          }
-          setImageToDelete(img);
-          setShowDeleteImageConfirm(true);
+          setImageContextMenuPos({ x: e.clientX, y: e.clientY });
+          setImageContextMenuTarget(img);
+          setShowImageContextMenu(true);
         };
       }
     }
@@ -923,15 +927,15 @@ function Note({ noteId }: NoteProps) {
         img.style.maxWidth = "100%";
         img.style.borderRadius = "4px";
         img.style.margin = "0";
-        img.style.cursor = "pointer"; // 改为 pointer，表示可点击
-        
-        // 添加点击事件：点击图片弹出删除提示框
-        img.onclick = (e) => {
+        img.style.cursor = "default";
+        img.onclick = null;
+        img.oncontextmenu = (e) => {
           e.stopPropagation();
           e.preventDefault();
-          console.log('[图片点击] 点击图片，弹出删除提示框');
-          setImageToDelete(img);
-          setShowDeleteImageConfirm(true);
+          console.log('[图片右键] 右键图片，显示菜单');
+          setImageContextMenuPos({ x: e.clientX, y: e.clientY });
+          setImageContextMenuTarget(img);
+          setShowImageContextMenu(true);
         };
         
         img.onload = () => {
@@ -996,6 +1000,15 @@ function Note({ noteId }: NoteProps) {
     setImageToDelete(null);
   };
 
+  // 处理图片右键菜单的删除操作
+  const handleImageContextMenuDelete = () => {
+    if (imageContextMenuTarget) {
+      setImageToDelete(imageContextMenuTarget);
+      setShowDeleteImageConfirm(true);
+      setShowImageContextMenu(false);
+    }
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file && file.type.startsWith("image/")) {
@@ -1012,7 +1025,10 @@ function Note({ noteId }: NoteProps) {
   };
 
   useEffect(() => {
-    const handleClick = () => setShowContextMenu(false);
+    const handleClick = () => {
+      setShowContextMenu(false);
+      setShowImageContextMenu(false);
+    };
     document.addEventListener("click", handleClick);
     return () => document.removeEventListener("click", handleClick);
   }, []);
@@ -1074,9 +1090,18 @@ function Note({ noteId }: NoteProps) {
   const handleContentFocus = () => {
     setIsEditing(true);
     setIsFocused(true);
+    isFocusedRef.current = true; // 同步更新 ref
   };
 
   const handleContentBlur = () => {
+    // 如果删除对话框正在显示，保持焦点状态（删除对话框也算便签内的操作）
+    if (showDeleteImageConfirm || showDeleteConfirm) {
+      setIsEditing(false);
+      // 保持焦点状态，不改变 isFocused
+      handleContentChange();
+      return;
+    }
+
     // 使用异步检查下一个获得焦点的元素，判断是否仍在便签内部
     // 这样在点击工具栏按钮、透明度滑块等控件时，不会立即认为便签失去焦点
     setTimeout(() => {
@@ -1090,9 +1115,11 @@ function Note({ noteId }: NoteProps) {
       if (stillInsideNote) {
         // 焦点只是从内容区域转移到工具栏等内部控件，保持“便签已获得焦点”状态
         setIsFocused(true);
+        isFocusedRef.current = true; // 同步更新 ref
       } else {
         // 焦点真正离开便签
         setIsFocused(false);
+        isFocusedRef.current = false; // 同步更新 ref
       }
 
       handleContentChange();
@@ -1107,6 +1134,7 @@ function Note({ noteId }: NoteProps) {
       }
       setIsEditing(false);
       setIsFocused(false);
+      isFocusedRef.current = false; // 同步更新 ref
     };
 
     window.addEventListener('blur', handleWindowBlur);
@@ -1264,6 +1292,18 @@ function Note({ noteId }: NoteProps) {
             </button>
             <button className="danger" onClick={handleDelete}>
               🗑️ 删除便签
+            </button>
+          </div>
+        )}
+
+        {/* 图片右键菜单 */}
+        {showImageContextMenu && (
+          <div
+            className="context-menu"
+            style={{ left: imageContextMenuPos.x, top: imageContextMenuPos.y }}
+          >
+            <button className="danger" onClick={handleImageContextMenuDelete}>
+              🗑️ 删除图片
             </button>
           </div>
         )}
