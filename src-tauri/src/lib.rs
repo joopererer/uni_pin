@@ -756,6 +756,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let manager = MenuItem::with_id(app, "manager", "📋 管理中心", true, None::<&str>)?;
     let show_all = MenuItem::with_id(app, "show_all", "👁️ 显示全部", true, None::<&str>)?;
     let hide_all = MenuItem::with_id(app, "hide_all", "🔽 隐藏全部", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "ℹ️ 关于", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
     let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &quit])?;
@@ -827,6 +828,19 @@ fn handle_menu_event(app: &AppHandle, menu_id: &str) {
                 }
                 let _ = save_notes(&store);
             }
+        }
+        "about" => {
+            let _ = create_manager_window(app);
+            // 等待窗口加载后发送消息
+            std::thread::spawn({
+                let app = app.clone();
+                move || {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                    if let Some(window) = app.get_webview_window("manager") {
+                        let _ = window.eval("if (window.showAboutDialog) window.showAboutDialog(); else window.dispatchEvent(new CustomEvent('showAbout'));");
+                    }
+                }
+            });
         }
         "quit" => {
             app.exit(0);
