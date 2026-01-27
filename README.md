@@ -2,7 +2,7 @@
 
 A lightweight desktop sticky notes application built with Tauri v2 and React.
 
-**Version: 0.2.0**
+**Version: 0.2.1**
 
 ## Features
 
