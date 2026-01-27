@@ -1068,11 +1068,44 @@ function Note({ noteId }: NoteProps) {
   };
 
   const handleContentBlur = () => {
-    // 同步清除编辑状态和焦点状态，确保状态一致性
-    setIsEditing(false);
-    setIsFocused(false);
-    handleContentChange();
+    // 使用异步检查下一个获得焦点的元素，判断是否仍在便签内部
+    // 这样在点击工具栏按钮、透明度滑块等控件时，不会立即认为便签失去焦点
+    setTimeout(() => {
+      const activeElement = document.activeElement as HTMLElement | null;
+      const stillInsideNote =
+        !!activeElement && !!containerRef.current && containerRef.current.contains(activeElement);
+
+      // 结束编辑状态
+      setIsEditing(false);
+
+      if (stillInsideNote) {
+        // 焦点只是从内容区域转移到工具栏等内部控件，保持“便签已获得焦点”状态
+        setIsFocused(true);
+      } else {
+        // 焦点真正离开便签
+        setIsFocused(false);
+      }
+
+      handleContentChange();
+    }, 0);
   };
+
+  // 当窗口失去焦点时，主动移除内容区域的焦点，避免被其他窗口覆盖后再次显示时自动获得焦点
+  useEffect(() => {
+    const handleWindowBlur = () => {
+      if (contentRef.current && document.activeElement === contentRef.current) {
+        contentRef.current.blur();
+      }
+      setIsEditing(false);
+      setIsFocused(false);
+    };
+
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, []);
 
   // 鼠标进入/离开
   const handleMouseEnter = () => {
