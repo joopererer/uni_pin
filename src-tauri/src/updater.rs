@@ -62,11 +62,11 @@ fn linux_pick_download_with_major_hint(
         !(tagged_for_22(name) || tagged_for_24(name))
     }
 
-    fn pick(
-        assets: &[ReleaseAsset],
+    fn pick<'a>(
+        assets: &'a [ReleaseAsset],
         ends_with: &str,
         major: Option<u8>,
-    ) -> Option<&ReleaseAsset> {
+    ) -> Option<&'a ReleaseAsset> {
         let cand: Vec<&ReleaseAsset> = assets.iter().filter(|a| a.name.ends_with(ends_with)).collect();
         if cand.is_empty() {
             return None;
