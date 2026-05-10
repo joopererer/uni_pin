@@ -10,7 +10,7 @@
 
 Lightweight sticky notes desktop app built with **Tauri v2** and **React**.
 
-**Version:** 0.2.2 · **Repository:** [joopererer/uni_pin](https://github.com/joopererer/uni_pin)
+**Version:** 0.2.3 · **Repository:** [joopererer/uni_pin](https://github.com/joopererer/uni_pin)
 
 ## Features
 
@@ -49,13 +49,13 @@ Release workflow produces a **draft** release — publish it manually on GitHub 
 
 ```bash
 # sync versions in package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml, then:
-git commit -am "chore: release v0.2.2"
-git tag -a v0.2.2 -m "v0.2.2"
+git commit -am "chore: release v0.2.3"
+git tag -a v0.2.3 -m "v0.2.3"
 git push origin main
-git push origin v0.2.2
+git push origin v0.2.3
 ```
 
-Or **Actions → Build and Release → Run workflow**, enter **`v0.2.2`** — the tag must already exist on the remote (`git push origin v0.2.2`).
+Or **Actions → Build and Release → Run workflow**, enter **`v0.2.3`** — the tag must already exist on the remote (`git push origin v0.2.3`).
 
 Optional secrets (Windows signing etc.) are wired through `release.yml`; unsigned builds still work without them.
 
