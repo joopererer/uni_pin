@@ -1,10 +1,11 @@
 name: Test
 
+# Legacy branch checks. Default branch `main` uses `.github/workflows/ci.yml` instead.
 on:
   push:
-    branches: [ master, dev ]
+    branches: [master, dev]
   pull_request:
-    branches: [ master, dev ]
+    branches: [master, dev]
 
 jobs:
   test-rust:

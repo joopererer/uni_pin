@@ -1,16 +1,25 @@
+# Build signed/unsigned installers and attach to a GitHub Release.
+# Triggers: git tag push `v*` (e.g. v0.2.2) or manual “Run workflow” (must enter existing tag).
 name: Build and Release
 
 on:
   push:
-    branches:
-      - master
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing git tag to build (e.g. v0.2.2). Create the tag locally first, then push it — or use a tag you already pushed.'
+        required: true
+        type: string
 
 permissions:
   contents: write
   pull-requests: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
+  cancel-in-progress: false
 
 env:
   TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -25,90 +34,44 @@ env:
 jobs:
   build-windows:
     runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', github.event.inputs.release_tag) || github.ref }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: npm
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
+      - run: npm run build
 
-      - name: Build frontend
-        run: npm run build
-
-      - name: Install Tauri CLI
+      - name: Tauri build & attach Windows artifacts to release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: .
-          tagName: ${{ github.ref_name }}
-          releaseName: 'UniStick v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: 'UniPin v__VERSION__'
+          releaseBody: |
+            ## UniPin ${{ env.RELEASE_TAG }}
+
+            | Platform | Artifacts |
+            |----------|-----------|
+            | Windows | NSIS `.exe` (and `.msi` if enabled) |
+            | Ubuntu 22.04 | `.deb` / `.AppImage` with suffix **`.ubuntu22.04`** |
+            | Ubuntu 24.04 | `.deb` / `.AppImage` with suffix **`.ubuntu24.04`** |
+
+            Choose the Linux package that matches your Ubuntu LTS. In-app updates pick the right asset via `/etc/os-release`.
           releaseDraft: true
           prerelease: false
-
-      - name: Upload Windows installer
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-macos:
-    runs-on: macos-latest
-    if: false # 暂时禁用，等有 Mac 开发者时再启用
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 18
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build frontend
-        run: npm run build
-
-      - name: Install Tauri CLI
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          tagName: ${{ github.ref_name }}
-          releaseName: 'UniStick v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
-
-      - name: Upload macOS installer
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            src-tauri/target/release/bundle/macos/*.dmg
-            src-tauri/target/release/bundle/macos/*.app
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
     strategy:
@@ -120,22 +83,22 @@ jobs:
           - os: ubuntu-24.04
             distro_tag: ubuntu24.04
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag || github.ref_name }}
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', github.event.inputs.release_tag) || github.ref }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: npm
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
       - name: Install system dependencies
         run: |
@@ -157,13 +120,12 @@ jobs:
             patchelf \
             pkg-config
 
-      - name: Build frontend
-        run: npm run build
+      - run: npm run build
 
-      - name: Build Tauri bundles (no auto-upload — names tagged per distro below)
+      - name: Build Tauri bundles
         run: npm exec -- tauri build
 
-      - name: Add distro suffix to Linux artifacts (avoid clashes between 22.04 and 24.04)
+      - name: Add distro suffix (22.04 vs 24.04)
         shell: bash
         run: |
           set -euo pipefail
@@ -178,10 +140,11 @@ jobs:
             mv "$f" "${base}.${tag}.AppImage"
           done
 
-      - name: Upload Linux installer
-        uses: softprops/action-gh-release@v1
+      - name: Upload Linux bundles
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          draft: true
           files: |
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb

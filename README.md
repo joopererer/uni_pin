@@ -1,220 +1,175 @@
 # UniPin 📝
 
-A lightweight desktop sticky notes application built with Tauri v2 and React.
+[![CI](https://github.com/joopererer/uni_pin/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/joopererer/uni_pin/actions/workflows/ci.yml)
+[![Build and Release](https://github.com/joopererer/uni_pin/actions/workflows/release.yml/badge.svg)](https://github.com/joopererer/uni_pin/actions/workflows/release.yml)
+[![GitHub Release](https://img.shields.io/github/v/release/joopererer/uni_pin?sort=semver)](https://github.com/joopererer/uni_pin/releases)
+[![Tauri](https://img.shields.io/badge/Tauri-v2-24C8DB?logo=tauri&logoColor=white)](https://tauri.app/)
+[![React](https://img.shields.io/badge/React-18-61dafb?logo=react&logoColor=white)](https://react.dev/)
+[![Rust](https://img.shields.io/badge/Rust-stable-dea584?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Ubuntu%2022.04+%20LTS-informational)](https://github.com/joopererer/uni_pin/releases)
 
-**Version: 0.2.1**
+Lightweight sticky notes desktop app built with **Tauri v2** and **React**.
+
+**Version:** 0.2.2 · **Repository:** [joopererer/uni_pin](https://github.com/joopererer/uni_pin)
 
 ## Features
 
-- 🎯 **System Tray Integration** - Runs in the system tray, no taskbar clutter
-- 📝 **Borderless Notes** - Create beautiful borderless, transparent sticky note windows
-- 🖼️ **Image Support** - Paste or insert images into notes (Ctrl+V)
-- 🎨 **Color Themes** - 6 beautiful color themes to choose from
-- 💧 **Opacity Control** - Adjust note transparency (0-90%)
-- 📍 **Always on Top** - Pin notes to stay above all windows
-- 🔍 **Search** - Search through all notes by content
-- ⚙️ **Auto Start** - Launch with Windows
-- 🌐 **Multi-language** - Supports Chinese and English
-- ⌨️ **Global Shortcut** - Press Alt+N to quickly create a new note
+- **System Tray** — Runs in the tray instead of clogging the taskbar
+- **Borderless Notes** — Transparent sticky windows
+- **Images** — Paste or insert images (Ctrl+V); clipboard backed by [**arboard**](https://docs.rs/arboard/) on Linux (X11/Wayland) and Windows
+- **Themes & Opacity** — Six themes; opacity slider (0–90%)
+- **Always on Top** — Pin important notes
+- **Search & Management Center** — List, search, batch show/hide/delete
+- **Auto Start** — OS integration via Tauri autostart plugin (where supported)
+- **Languages** — 中文 / English  
+- **Global Shortcut** — Alt+N creates a note (behavior may vary on some Wayland sessions)
 
-## Requirements
+## Download (prebuilt)
 
-- Node.js 18+
-- Rust 1.70+
-- **Windows** 10/11 — primary platform
-- **Ubuntu** 22.04 / 24.04 — install `.deb` from releases or build from source (see below); Wayland/X11 clipboard via `arboard`
+Stable builds are attached to [**GitHub Releases**](https://github.com/joopererer/uni_pin/releases).
+
+| OS | Typical files |
+|----|----------------|
+| Windows 10/11 | NSIS **`.exe`** (optional **`.msi`** if enabled in bundle) |
+| Ubuntu 22.04 LTS | **`.deb`** and **`.AppImage`** with suffix **`.ubuntu22.04`** |
+| Ubuntu 24.04 LTS | Same with suffix **`.ubuntu24.04`** |
+
+Install the `.deb` that matches your distro; **in-app updates** resolve the correct asset using `/etc/os-release`.
+
+Release workflow produces a **draft** release — publish it manually on GitHub when assets look good.
+
+## CI / Release automation
+
+| Workflow | When | What |
+|----------|------|------|
+| [**CI**](`.github/workflows/ci.yml`) | Push & PR on `main` (also `master`/`dev`) | Frontend build, Rust **`cargo test`** (Linux), **`cargo check`** (Windows) |
+| [**Release**](`.github/workflows/release.yml`) | Tag push **`v*`** **or** *Run workflow* (manual tag input) | Windows (Tauri Action), Ubuntu **22.04 / 24.04** matrix → `.deb` + `.AppImage` |
+
+### Cutting a release (maintainers)
+
+```bash
+# sync versions in package.json, src-tauri/tauri.conf.json, src-tauri/Cargo.toml, then:
+git commit -am "chore: release v0.2.2"
+git tag -a v0.2.2 -m "v0.2.2"
+git push origin main
+git push origin v0.2.2
+```
+
+Or **Actions → Build and Release → Run workflow**, enter **`v0.2.2`** — the tag must already exist on the remote (`git push origin v0.2.2`).
+
+Optional secrets (Windows signing etc.) are wired through `release.yml`; unsigned builds still work without them.
+
+## Requirements (from source)
+
+- Node.js **18+**
+- Rust **stable**
+- **Windows** 10/11 — WebView2 (usually preinstalled)
+- **Ubuntu** 22.04 / 24.04 — WebKitGTK 4.1 dev packages (see below)
 
 ## Installation
 
 ### Ubuntu 22.04 / 24.04
 
-Install build dependencies (similar to [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/)), then clone and build. Example on Ubuntu:
-
 ```bash
 sudo apt update
 sudo apt install -y build-essential curl wget libssl-dev libgtk-3-dev \
   libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev \
-  patchelf pkg-config
+  patchelf pkg-config libglib2.0-dev libgdk-pixbuf2.0-dev \
+  libpango1.0-dev libatk1.0-dev libcairo2-dev
 ```
 
-Then from the project root: `npm install`, `npm run tauri build`. Artifacts: `src-tauri/target/release/bundle/deb/*.deb` and `.../appimage/*.AppImage`.
+Then:
 
-Official releases include **two** `.deb` / `.AppImage` pairs (suffixes **`.ubuntu22.04`** and **`.ubuntu24.04`**) built on each LTS; choose the file that matches your distro. The in-app update checker selects the correct asset using `/etc/os-release`.
-
-### Build from Source
-
-1. Clone the repository:
 ```bash
 git clone https://github.com/joopererer/uni_pin.git
 cd uni_pin
-```
-
-2. Install dependencies:
-```bash
 npm install
-```
-
-3. Run in development mode:
-```bash
-npm run tauri dev
-```
-
-4. Build for production:
-```bash
 npm run tauri build
 ```
 
-Installers: Windows `src-tauri/target/release/bundle/nsis/` (and MSI if enabled); Linux `bundle/deb/` and `bundle/appimage/`.
+Artifacts: `src-tauri/target/release/bundle/deb/*.deb`, `bundle/appimage/*.AppImage`.
+
+### Build from Source (any supported host)
+
+```bash
+git clone https://github.com/joopererer/uni_pin.git
+cd uni_pin
+npm install
+npm run tauri dev    # development
+npm run tauri build  # production installers under src-tauri/target/release/bundle/
+```
 
 ## Usage
 
-1. **Launch** - The application runs in the system tray (bottom-right corner)
-2. **Create Note** - Left-click the tray icon or press Alt+N
-3. **Manage Notes** - Left-click the tray icon to open the Management Center
-4. **Edit Notes** - Double-click a note to edit, toolbar appears on hover
-5. **Add Images** - Paste images with Ctrl+V or click the image button
-6. **Change Theme** - Click the color button to cycle through themes
-7. **Adjust Opacity** - Use the opacity slider in the toolbar
-8. **Pin Note** - Right-click and select "Pin Window" to keep it on top
-9. **Hide Note** - Click the minimize button (-) to hide a note
-10. **Delete Note** - Click the delete button (🗑️) to remove a note
+1. **Launch** — Tray icon (Windows: notification area).
+2. **New note** — Left-click tray or **Alt+N**.
+3. **Management Center** — Left-click tray → manage all notes.
+4. **Edit** — Double-click a note.
+5. **Images** — Ctrl+V paste or toolbar image button.
+6. **Themes / opacity / pin** — Hover toolbar controls.
+7. **Hide** — Minimize strip on the note; **Delete** — trash icon.
 
-### Keyboard Shortcuts
+### Shortcuts
 
-- `Alt + N` - Create a new note
+- **Alt+N** — New note (global; may require X11 / compositor cooperation on Linux).
 
 ### Management Center
 
-- View all notes (visible and hidden)
-- Search notes by content
-- Batch operations (show/hide/delete)
-- Settings:
-  - Auto-start with system
-  - Language selection (中文 / English)
+- Search, batch show/hide/delete  
+- Settings: language (中文 / English), auto-start  
 
 ## Project Structure
 
 ```
 uni_pin/
-├── src/                    # React frontend
-│   ├── components/
-│   │   ├── Note.tsx       # Sticky note component
-│   │   ├── Manager.tsx    # Management center
-│   │   ├── AboutDialog.tsx
-│   │   ├── UpdateDialog.tsx
-│   │   └── ConfirmDialog.tsx
-│   ├── hooks/
-│   │   └── useI18n.ts     # Internationalization hook
-│   ├── i18n/
-│   │   └── index.ts       # Translation files
-│   ├── App.tsx
-│   ├── main.tsx
-│   └── styles.css
-├── src-tauri/              # Tauri/Rust backend
-│   ├── src/
-│   │   ├── lib.rs         # Core logic: tray, windows, commands
-│   │   ├── main.rs        # Entry point
-│   │   ├── note_store.rs  # Data persistence
-│   │   └── updater.rs     # Update checker
-│   ├── icons/             # Application icons
-│   ├── capabilities/      # Permissions configuration
-│   ├── Cargo.toml
-│   └── tauri.conf.json
+├── src/                    # React + Vite
+├── src-tauri/              # Rust — tray, IPC, updater, persistence
+├── .github/workflows/      # ci.yml, release.yml, test.yml (legacy branches)
 ├── package.json
 └── vite.config.ts
 ```
 
-## Core API
+## Data storage
 
-### Rust Commands
+| Platform | Notes & settings | Images |
+|----------|-----------------|--------|
+| Windows | `%LocalAppData%\UniPin\notes.json` | `%LocalAppData%\UniPin\images\` |
+| Linux | `~/.local/share/UniPin/notes.json` (via XDG data local) | `~/.local/share/UniPin/images/` |
 
-```rust
-// Create a new note window
-#[tauri::command]
-fn create_note_window(app: AppHandle) -> Result<String, String>
+Paths follow the [`dirs`](https://docs.rs/dirs/) crate (`data_local_dir` + `/UniPin`).
 
-// Save note content
-#[tauri::command]
-fn save_note(state: State<'_, NoteStoreState>, id: String, content: String, theme_index: u32) -> Result<(), String>
+## Core API snapshot
 
-// Update note position
-#[tauri::command]
-fn update_note_position(state: State<'_, NoteStoreState>, id: String, x: f64, y: f64) -> Result<(), String>
+Rust commands (`src-tauri/src/lib.rs`) include `create_note_window`, `save_note`, tray-related flows, **`get_clipboard_image`**, and **`check_update`** (GitHub Releases). Frontend uses `@tauri-apps/api` `invoke()`.
 
-// Get all notes
-#[tauri::command]
-fn get_all_notes(state: State<'_, NoteStoreState>) -> Vec<NoteData>
-
-// Check for updates
-#[tauri::command]
-async fn check_update() -> Result<Option<serde_json::Value>, String>
-```
-
-### Frontend Usage
-
-```typescript
-import { invoke } from "@tauri-apps/api/core";
-
-// Create a new note
-const label = await invoke("create_note_window");
-
-// Save note content
-await invoke("save_note", { 
-  id: "note-1", 
-  content: "<p>Hello World</p>", 
-  themeIndex: 0 
-});
-
-// Get all notes
-const notes = await invoke("get_all_notes");
-```
-
-## Data Storage
-
-- **Notes Data**: `%LocalAppData%/UniPin/notes.json`
-- **Images**: `%LocalAppData%/UniPin/images/`
+See source for full typings.
 
 ## Development
 
-### Run Tests
-
 ```bash
-# Frontend tests
-npm run test
-
-# Rust tests
-cd src-tauri
-cargo test
+npm run test        # frontend (Vitest) when enabled
+cd src-tauri && cargo test
 ```
 
-### Build Release
+### Build Release locally
 
 ```bash
 npm run tauri build
 ```
 
-This will create a Windows installer in `src-tauri/target/release/bundle/nsis/`.
-
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Pull requests welcome.
 
 ## License
 
 Copyright © 2026 UniPin. All rights reserved.
 
-## Author
+## Author & links
 
-[joopererer](https://github.com/joopererer)
+- [joopererer](https://github.com/joopererer)  
+- [Issues](https://github.com/joopererer/uni_pin/issues)  
 
-## Links
+---
 
-- **Repository**: https://github.com/joopererer/uni_pin
-- **Issues**: https://github.com/joopererer/uni_pin/issues
-
-## Acknowledgments
-
-Built with:
-- [Tauri](https://tauri.app/) - Framework for building desktop applications
-- [React](https://react.dev/) - UI library
-- [Vite](https://vitejs.dev/) - Build tool
+Built with [Tauri](https://tauri.app/), [React](https://react.dev/), [Vite](https://vitejs.dev/).
