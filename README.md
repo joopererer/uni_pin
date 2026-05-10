@@ -21,9 +21,25 @@ A lightweight desktop sticky notes application built with Tauri v2 and React.
 
 - Node.js 18+
 - Rust 1.70+
-- Windows 10/11 (macOS and Linux support coming soon)
+- **Windows** 10/11 — primary platform
+- **Ubuntu** 22.04 / 24.04 — install `.deb` from releases or build from source (see below); Wayland/X11 clipboard via `arboard`
 
 ## Installation
+
+### Ubuntu 22.04 / 24.04
+
+Install build dependencies (similar to [Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/)), then clone and build. Example on Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y build-essential curl wget libssl-dev libgtk-3-dev \
+  libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev \
+  patchelf pkg-config
+```
+
+Then from the project root: `npm install`, `npm run tauri build`. Artifacts: `src-tauri/target/release/bundle/deb/*.deb` and `.../appimage/*.AppImage`.
+
+Official releases include **two** `.deb` / `.AppImage` pairs (suffixes **`.ubuntu22.04`** and **`.ubuntu24.04`**) built on each LTS; choose the file that matches your distro. The in-app update checker selects the correct asset using `/etc/os-release`.
 
 ### Build from Source
 
@@ -48,7 +64,7 @@ npm run tauri dev
 npm run tauri build
 ```
 
-The installer will be generated in `src-tauri/target/release/bundle/nsis/`.
+Installers: Windows `src-tauri/target/release/bundle/nsis/` (and MSI if enabled); Linux `bundle/deb/` and `bundle/appimage/`.
 
 ## Usage
 

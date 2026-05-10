@@ -26,12 +26,7 @@ base64 = "0.21"
 chrono = "0.4"
 reqwest = { version = "0.11", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
-windows = { version = "0.54", features = [
-    "Win32_System_DataExchange",
-    "Win32_Foundation",
-    "Win32_Graphics_Gdi",
-    "Win32_System_Memory",
-] }
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 
 [profile.release]
 panic = "abort"

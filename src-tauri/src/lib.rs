@@ -2,7 +2,7 @@ mod note_store;
 pub mod updater;
 
 use note_store::{load_notes, save_notes, NoteData, NoteStoreState, WindowPosition, WindowSize, get_images_dir, write_log as write_log_file, get_log_path as get_log_file_path};
-use updater::check_for_updates;
+use updater::{check_for_updates, download_url_for_current_platform};
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
@@ -346,144 +346,105 @@ fn get_all_note_windows(app: AppHandle) -> Vec<String> {
         .collect()
 }
 
-/// 从 Windows 剪贴板读取图片
+/// 从系统剪贴板读取图片（Windows / Linux / macOS，含 Ubuntu X11 与 Wayland）
 #[tauri::command]
 fn get_clipboard_image() -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::System::DataExchange::*;
-        use windows::Win32::System::Memory::*;
-        use windows::Win32::Foundation::HGLOBAL;
-        
-        println!("[后端] === get_clipboard_image 开始 ===");
-        
-        unsafe {
-            // 打开剪贴板
-            match OpenClipboard(None) {
-                Ok(_) => {
-                    println!("[后端] ✓ 剪贴板已打开");
-                }
-                Err(e) => {
-                    println!("[后端] ✗ 打开剪贴板失败: {:?}", e);
-                    return Ok(None);
-                }
-            }
-            
-            let result = {
-                // 检查是否有 DIB 格式（Windows 位图）
-                // CF_DIB = 8
-                println!("[后端] 检查剪贴板中是否有 DIB 格式 (CF_DIB=8)...");
-                let h_dib_result = GetClipboardData(8u32);
-                if h_dib_result.is_err() {
-                    println!("[后端] ✗ 剪贴板中没有 DIB 格式的数据");
-                    let _ = CloseClipboard();
-                    return Ok(None);
-                }
-                
-                println!("[后端] ✓ 找到 DIB 格式数据");
-                let h_dib_handle = h_dib_result.unwrap();
-                // 将 HANDLE 转换为 HGLOBAL（HANDLE 是 isize，HGLOBAL 是 *mut c_void）
-                let h_dib = HGLOBAL(h_dib_handle.0 as *mut std::ffi::c_void);
-                let ptr = GlobalLock(h_dib);
-                if ptr.is_null() {
-                    println!("[后端] ✗ GlobalLock 失败，无法锁定内存");
-                    let _ = CloseClipboard();
-                    return Ok(None);
-                }
-                
-                let size = GlobalSize(h_dib) as usize;
-                println!("[后端] DIB 数据大小: {} 字节", size);
-                if size < 40 {
-                    // DIB 头至少需要 40 字节
-                    println!("[后端] ✗ DIB 数据太小 (< 40 字节)，不符合 BITMAPINFOHEADER 要求");
-                    let _ = GlobalUnlock(h_dib);
-                    let _ = CloseClipboard();
-                    return Ok(None);
-                }
-                
-                let dib_data = std::slice::from_raw_parts(ptr as *const u8, size);
-                
-                // 读取 BITMAPINFOHEADER 来确定偏移
-                let header_size = u32::from_le_bytes([dib_data[0], dib_data[1], dib_data[2], dib_data[3]]);
-                println!("[后端] BITMAPINFOHEADER 大小: {} 字节", header_size);
-                let offset = if header_size == 124 { 124 } else { 40 }; // DIBV5 or DIB
-                println!("[后端] 使用偏移量: {} 字节", offset);
-                
-                // 构造 BMP 文件头（14 字节）
-                let mut bmp_data = Vec::with_capacity(size + 14);
-                bmp_data.extend_from_slice(b"BM");
-                let file_size = (size + 14) as u32;
-                bmp_data.extend_from_slice(&file_size.to_le_bytes());
-                bmp_data.extend_from_slice(&[0u8; 4]); // reserved
-                bmp_data.extend_from_slice(&((offset + 14) as u32).to_le_bytes()); // offset to pixel data
-                bmp_data.extend_from_slice(dib_data);
-                println!("[后端] BMP 文件数据大小: {} 字节", bmp_data.len());
-                
-                let _ = GlobalUnlock(h_dib);
-                
-                // 使用 image crate 加载图片
-                println!("[后端] 尝试使用 image crate 加载 BMP 数据...");
-                match image::load_from_memory(&bmp_data) {
-                    Ok(img) => {
-                        let (w, h) = img.dimensions();
-                        println!("[后端] ✓ 图片加载成功: {}x{} 像素", w, h);
-                        
-                        // 限制最大尺寸
-                        let max_size = 800;
-                        let processed_img = if w > max_size || h > max_size {
-                            let ratio = (max_size as f32 / w.max(h) as f32).min(1.0);
-                            let new_width = (w as f32 * ratio) as u32;
-                            let new_height = (h as f32 * ratio) as u32;
-                            println!("[后端] 图片过大，缩放至: {}x{} 像素", new_width, new_height);
-                            img.resize(new_width, new_height, image::imageops::FilterType::Lanczos3)
-                        } else {
-                            img
-                        };
-                        
-                        // 编码为 PNG bytes
-                        println!("[后端] 编码为 PNG 格式...");
-                        let mut png_bytes = Vec::new();
-                        {
-                            use image::ImageEncoder;
-                            let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
-                            encoder.write_image(
-                                processed_img.as_bytes(),
-                                processed_img.width(),
-                                processed_img.height(),
-                                processed_img.color(),
-                            )
-                            .map_err(|e| {
-                                println!("[后端] ✗ PNG 编码失败: {}", e);
-                                format!("编码 PNG 失败: {}", e)
-                            })?;
-                        }
-                        println!("[后端] ✓ PNG 编码完成，大小: {} 字节", png_bytes.len());
-                        
-                        // 转换为 base64
-                        let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                        let result = Some(format!("data:image/png;base64,{}", base64_data));
-                        println!("[后端] ✓ Base64 编码完成，总长度: {} 字符", base64_data.len());
-                        result
-                    }
-                    Err(e) => {
-                        println!("[后端] ✗ 加载剪贴板图片失败: {}", e);
-                        None
-                    }
-                }
-            };
-            
-            let _ = CloseClipboard();
-            println!("[后端] 剪贴板已关闭");
-            println!("[后端] === get_clipboard_image 完成 ===");
-            Ok(result)
+    println!("[后端] === get_clipboard_image 开始 ===");
+
+    let mut clipboard = match arboard::Clipboard::new() {
+        Ok(c) => c,
+        Err(e) => {
+            println!("[后端] ✗ 无法打开剪贴板: {:?}", e);
+            return Ok(None);
         }
+    };
+
+    let img = match clipboard.get_image() {
+        Ok(i) => i,
+        Err(arboard::Error::ContentNotAvailable) => {
+            println!("[后端] 剪贴板中无图片");
+            return Ok(None);
+        }
+        Err(e) => {
+            println!("[后端] ✗ 读取剪贴板图片失败: {:?}", e);
+            return Ok(None);
+        }
+    };
+
+    let width = img.width as u32;
+    let height = img.height as u32;
+    let expected = (width as usize).saturating_mul(height as usize).saturating_mul(4);
+
+    if width == 0 || height == 0 || img.bytes.len() < expected {
+        println!(
+            "[后端] ✗ RGBA 数据无效 ({}x{}, {} 字节)",
+            width,
+            height,
+            img.bytes.len()
+        );
+        return Ok(None);
     }
-    
-    #[cfg(not(target_os = "windows"))]
+
+    let mut raw: Vec<u8> = img.bytes.into_owned();
+    if raw.len() > expected {
+        raw.truncate(expected);
+    }
+
+    let rgba = match image::RgbaImage::from_raw(width, height, raw) {
+        Some(i) => i,
+        None => {
+            println!("[后端] ✗ 无法构造 RGBA 图像");
+            return Ok(None);
+        }
+    };
+
+    let dynamic = image::DynamicImage::ImageRgba8(rgba);
+    let (w, h) = dynamic.dimensions();
+    let max_size = 800_u32;
+    let processed_img = if w > max_size || h > max_size {
+        let ratio = (max_size as f32 / w.max(h) as f32).min(1.0);
+        let new_width = (w as f32 * ratio) as u32;
+        let new_height = (h as f32 * ratio) as u32;
+        println!(
+            "[后端] 图片过大，缩放至: {}x{} 像素",
+            new_width, new_height
+        );
+        dynamic.resize(
+            new_width,
+            new_height,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        println!("[后端] ✓ 图片: {}x{} 像素", w, h);
+        dynamic
+    };
+
+    let mut png_bytes = Vec::new();
     {
-        println!("[后端] get_clipboard_image: 非 Windows 平台，返回 None");
-        Ok(None)
+        use image::ImageEncoder;
+        let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+        encoder
+            .write_image(
+                processed_img.as_bytes(),
+                processed_img.width(),
+                processed_img.height(),
+                processed_img.color(),
+            )
+            .map_err(|e| {
+                println!("[后端] ✗ PNG 编码失败: {}", e);
+                format!("编码 PNG 失败: {}", e)
+            })?;
     }
+
+    let base64_data = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+    println!(
+        "[后端] ✓ get_clipboard_image 完成，PNG {} 字节",
+        png_bytes.len()
+    );
+    Ok(Some(format!(
+        "data:image/png;base64,{}",
+        base64_data
+    )))
 }
 
 /// 保存图片到 AppData 目录（带压缩）
@@ -661,10 +622,7 @@ fn set_auto_show_toolbar(app: AppHandle, state: State<'_, NoteStoreState>, enabl
 async fn check_update() -> Result<Option<serde_json::Value>, String> {
     match check_for_updates().await {
         Ok(Some(release)) => {
-            // 转换为前端期望的格式
-            let download_url = release.assets.first()
-                .map(|a| a.browser_download_url.clone())
-                .unwrap_or_default();
+            let download_url = download_url_for_current_platform(&release).unwrap_or_default();
             
             Ok(Some(serde_json::json!({
                 "version": release.tag_name,
@@ -759,7 +717,10 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let about = MenuItem::with_id(app, "about", "ℹ️ 关于", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "❌ 退出", true, None::<&str>)?;
 
-    let menu = Menu::with_items(app, &[&new_note, &manager, &show_all, &hide_all, &quit])?;
+    let menu = Menu::with_items(
+        app,
+        &[&new_note, &manager, &show_all, &hide_all, &about, &quit],
+    )?;
 
     let png_bytes = include_bytes!("../icons/32x32.png");
     let img = image::load_from_memory(png_bytes).expect("Failed to load icon");
@@ -908,9 +869,8 @@ pub fn run() {
                             write_log_file(&format!("🆕 发现新版本: {}", release.tag_name));
                             // 可以发送事件到前端显示更新提示
                             if let Some(window) = app_handle.get_webview_window("manager") {
-                                let download_url = release.assets.first()
-                                    .map(|a| a.browser_download_url.clone())
-                                    .unwrap_or_default();
+                                let download_url =
+                                    download_url_for_current_platform(&release).unwrap_or_default();
                                 let _ = window.eval(&format!(
                                     "window.dispatchEvent(new CustomEvent('updateAvailable', {{ detail: {{ version: '{}', url: '{}', notes: '{}' }} }}));",
                                     release.tag_name,

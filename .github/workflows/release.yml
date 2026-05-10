@@ -111,8 +111,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-linux:
-    runs-on: ubuntu-latest
-    if: false # 暂时禁用，等有 Linux 开发者时再启用
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            distro_tag: ubuntu22.04
+          - os: ubuntu-24.04
+            distro_tag: ubuntu24.04
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -133,26 +140,48 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libglib2.0-dev \
+            libgdk-pixbuf2.0-dev \
+            libpango1.0-dev \
+            libatk1.0-dev \
+            libcairo2-dev \
+            libwebkit2gtk-4.1-dev \
+            patchelf \
+            pkg-config
 
       - name: Build frontend
         run: npm run build
 
-      - name: Install Tauri CLI
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          tagName: ${{ github.ref_name }}
-          releaseName: 'UniStick v__VERSION__'
-          releaseBody: 'See the assets to download this version and install.'
-          releaseDraft: true
-          prerelease: false
+      - name: Build Tauri bundles (no auto-upload — names tagged per distro below)
+        run: npm exec -- tauri build
+
+      - name: Add distro suffix to Linux artifacts (avoid clashes between 22.04 and 24.04)
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ matrix.distro_tag }}"
+          shopt -s nullglob
+          for f in src-tauri/target/release/bundle/deb/*.deb; do
+            base="${f%.deb}"
+            mv "$f" "${base}.${tag}.deb"
+          done
+          for f in src-tauri/target/release/bundle/appimage/*.AppImage; do
+            base="${f%.AppImage}"
+            mv "$f" "${base}.${tag}.AppImage"
+          done
 
       - name: Upload Linux installer
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ github.ref_name }}
           files: |
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb

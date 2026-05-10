@@ -784,14 +784,14 @@ function Note({ noteId }: NoteProps) {
     
     // 步骤2：如果浏览器 API 没有找到图片，尝试使用 Windows 系统剪贴板 API
     // 对于网络图片（从网页复制），浏览器剪贴板可能不会暴露文件类型，但 Windows 剪贴板可能包含 DIB 格式
-    // 所以我们总是尝试 Windows API（如果浏览器 API 没找到图片）
+    // 若浏览器剪贴板未提供图片，再尝试 Tauri 后端（跨平台剪贴板）
     if (!foundImage) {
       triedWindowsAPI = true;
       console.log("[粘贴事件] 步骤2: 尝试使用 Windows 系统剪贴板 API");
       console.log("[粘贴事件] 提示: 浏览器 API 可能无法识别所有图片格式（特别是从网页复制的图片），尝试使用系统 API...");
       try {
         const clipboardImage = await invoke<string | null>("get_clipboard_image");
-        console.log(`[粘贴事件] Windows API 返回结果: ${clipboardImage ? "找到图片" : "未找到图片"}`);
+        console.log(`[粘贴事件] 后端剪贴板结果: ${clipboardImage ? "找到图片" : "未找到图片"}`);
         if (clipboardImage) {
           e.preventDefault();
           console.log("[粘贴事件] ✓ 从 Windows 剪贴板读取到图片数据，开始转换...");
@@ -811,14 +811,14 @@ function Note({ noteId }: NoteProps) {
             console.error(`[粘贴事件] 错误详情: ${errorDetails}`);
           }
         } else {
-          console.log("[粘贴事件] Windows API 返回 None，剪贴板中可能没有图片或格式不支持");
+          console.log("[粘贴事件] 后端剪贴板无图片或格式不支持");
         }
       } catch (err) {
         console.error("[粘贴事件] ✗ 调用 Windows 剪贴板 API 失败:", err);
         const errorDetails = err instanceof Error ? err.message : String(err);
         console.error(`[粘贴事件] 错误详情: ${errorDetails}`);
       }
-      console.log("[粘贴事件] 步骤2完成: Windows API 未找到图片");
+      console.log("[粘贴事件] 步骤2完成: 后端未从剪贴板取得图片");
     }
     
     // 如果所有方式都尝试过但未找到图片
